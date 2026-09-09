@@ -1,0 +1,8 @@
+bin/
+logs/
+*.bak
+*.bak.tmp
+*.tmp
+state.json
+*.lock
+agent.lock

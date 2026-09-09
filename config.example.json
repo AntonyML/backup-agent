@@ -1,0 +1,8 @@
+{
+  "backup_dir": "C:\\Backups\\",
+  "server": "Caproba01\\vbadilla",
+  "database": "CONTABILIDAD",
+  "retain": 3,
+  "login_timeout_sec": 15,
+  "backup_timeout_sec": 3600
+}
