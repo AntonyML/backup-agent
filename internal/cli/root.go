@@ -14,6 +14,7 @@ import (
 	"femucaribe-backup-agent/internal/storage"
 	"femucaribe-backup-agent/internal/storage/local"
 	"femucaribe-backup-agent/internal/storage/r2"
+	"femucaribe-backup-agent/internal/storage/server"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -113,6 +114,17 @@ func BuildDefaultApp(exeDir string, cfgPath string) (*application.App, error) {
 		}
 	} else {
 		logger.Warn("no se encontraron credenciales de R2 en config.dat")
+	}
+
+	if cfg.RemoteServer.Enabled {
+		serverBackend := server.New(server.Config{
+			Enabled:    cfg.RemoteServer.Enabled,
+			RemotePath: cfg.RemoteServer.RemotePath,
+			Keep:       cfg.RemoteServer.Keep,
+			TimeoutSec: cfg.RemoteServer.TimeoutSec,
+			Database:   cfg.Database,
+		}, logger)
+		backends = append(backends, serverBackend)
 	}
 
 	return application.New(application.Options{

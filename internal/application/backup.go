@@ -56,7 +56,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) error {
 	}
 
 	// Sincronización diferida previa: si hay backup pendiente, intentar subirlo antes de hacer el del día
-	if st.PendingSync.R2 && st.LastBackupFile != "" {
+	if (st.PendingSync.R2 || st.PendingSync.Server) && st.LastBackupFile != "" {
 		a.syncPendingBackup(ctx, st)
 	}
 
@@ -171,12 +171,19 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) error {
 		uploadErr := b.Upload(uploadCtx, finalPath)
 		uploadCancel()
 
+		isR2 := strings.EqualFold(b.Name(), "r2")
+		isServer := strings.EqualFold(b.Name(), "server")
+
 		if uploadErr != nil {
 			var retryErr *storage.RetryableError
 			if errors.As(uploadErr, &retryErr) {
 				a.logger.Warn("falla transitoria en backend remoto; se registra sincronización pendiente",
 					"backend", b.Name(), "error", uploadErr)
-				st.SetPendingR2(true)
+				if isR2 {
+					st.SetPendingR2(true)
+				} else if isServer {
+					st.SetPendingServer(true)
+				}
 				_ = state.Save(a.statePath, st)
 				hadPending = true
 			} else {
@@ -187,13 +194,25 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) error {
 		} else {
 			a.logger.Info("subida a backend remoto confirmada",
 				"backend", b.Name(), "archivo", filepath.Base(finalPath))
-			st.MarkR2Synced(filepath.Base(finalPath))
-			_ = state.Save(a.statePath, st)
-
-			if err := b.Rotate(ctx, 1); err != nil {
-				a.logger.Warn("rotación en backend remoto con advertencia",
-					"backend", b.Name(), "error", err)
+			if isR2 {
+				st.MarkR2Synced(filepath.Base(finalPath))
+				if err := b.Rotate(ctx, 1); err != nil {
+					a.logger.Warn("rotación en backend remoto con advertencia",
+						"backend", b.Name(), "error", err)
+				}
+			} else if isServer {
+				st.MarkServerSynced(filepath.Base(finalPath))
+				if err := b.Rotate(ctx, 10); err != nil {
+					a.logger.Warn("rotación en backend remoto con advertencia",
+						"backend", b.Name(), "error", err)
+				}
+			} else {
+				if err := b.Rotate(ctx, 0); err != nil {
+					a.logger.Warn("rotación en backend remoto con advertencia",
+						"backend", b.Name(), "error", err)
+				}
 			}
+			_ = state.Save(a.statePath, st)
 		}
 	}
 
@@ -206,31 +225,42 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) error {
 
 func (a *App) syncPendingBackup(ctx context.Context, st *state.State) {
 	if _, err := os.Stat(st.LastBackupFile); err != nil {
-		a.logger.Warn("el archivo pendiente no existe en disco, descartando pendiente",
+		a.logger.Warn("el archivo pendiente no existe en disco, descartando pendientes",
 			"archivo", st.LastBackupFile)
 		st.SetPendingR2(false)
+		st.SetPendingServer(false)
 		_ = state.Save(a.statePath, st)
 		return
 	}
 
 	a.logger.Info("iniciando sincronización de backup pendiente", "archivo", st.LastBackupFile)
-	allOk := true
 	for _, b := range a.backends {
+		isR2 := strings.EqualFold(b.Name(), "r2")
+		isServer := strings.EqualFold(b.Name(), "server")
+
+		// Solo intentar sincronizar si este backend tiene pendiente
+		if (isR2 && !st.PendingSync.R2) || (isServer && !st.PendingSync.Server) {
+			continue
+		}
+
 		syncCtx, syncCancel := context.WithTimeout(ctx, 10*time.Minute)
 		err := b.Upload(syncCtx, st.LastBackupFile)
 		syncCancel()
 		if err != nil {
-			allOk = false
 			a.logger.Warn("reintento de sync pendiente falló", "backend", b.Name(), "error", err)
 		} else {
 			a.logger.Info("sync pendiente exitosa", "backend", b.Name())
-			_ = b.Rotate(ctx, 1)
+			if isR2 {
+				st.MarkR2Synced(filepath.Base(st.LastBackupFile))
+				_ = b.Rotate(ctx, 1)
+			} else if isServer {
+				st.MarkServerSynced(filepath.Base(st.LastBackupFile))
+				_ = b.Rotate(ctx, 10)
+			} else {
+				_ = b.Rotate(ctx, 0)
+			}
+			_ = state.Save(a.statePath, st)
 		}
-	}
-
-	if allOk {
-		st.MarkR2Synced(filepath.Base(st.LastBackupFile))
-		_ = state.Save(a.statePath, st)
 	}
 }
 

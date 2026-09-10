@@ -56,7 +56,7 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 			backupStatus.LastRun = parsed
 		}
 
-		if st.PendingSync.R2 {
+		if st.PendingSync.R2 || st.PendingSync.Server {
 			backupStatus.Result = "pending_sync"
 		} else {
 			backupStatus.Result = "success"
@@ -109,7 +109,7 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 		StatusText:  r2StatusText,
 	})
 
-	// 3. Server (placeholder extensible para Fase 3)
+	// 3. Server
 	serverConfigured := false
 	for _, b := range a.backends {
 		if strings.EqualFold(b.Name(), "server") {
@@ -119,13 +119,19 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 	}
 	serverStatusText := "Not configured"
 	if serverConfigured {
-		serverStatusText = "OK"
+		if st.PendingSync.Server {
+			serverStatusText = "PENDING"
+		} else if st.ServerLastSyncedFile != "" {
+			serverStatusText = "OK"
+		} else {
+			serverStatusText = "OK"
+		}
 	}
 	backendStatuses = append(backendStatuses, BackendStatus{
 		Name:        "Server",
 		Configured:  serverConfigured,
-		LastSyncOK:  serverConfigured,
-		PendingSync: false,
+		LastSyncOK:  serverConfigured && !st.PendingSync.Server && st.ServerLastSyncedFile != "",
+		PendingSync: st.PendingSync.Server,
 		StatusText:  serverStatusText,
 	})
 

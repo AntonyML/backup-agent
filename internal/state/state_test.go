@@ -166,3 +166,45 @@ func TestSaveLoad_Fase2Fields(t *testing.T) {
 	}
 }
 
+func TestSaveLoad_Fase3ServerFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	want := &State{
+		LastRunDate:    "2026-01-15",
+		LastBackupFile: `C:\Backups\CONTABILIDAD_20260115_1200.bak`,
+		SHA256:         "abc123",
+		PendingSync: PendingSync{
+			R2:     false,
+			Server: true,
+		},
+		ServerLastSyncedFile: "CONTABILIDAD_20260114_1200.bak",
+	}
+
+	if err := Save(path, want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if *got != *want {
+		t.Errorf("roundtrip Fase 3: quiero %+v, obtuve %+v", want, got)
+	}
+
+	// Probar helpers
+	got.MarkServerSynced("CONTABILIDAD_20260115_1200.bak")
+	if got.PendingSync.Server {
+		t.Errorf("tras MarkServerSynced, PendingSync.Server debe ser false")
+	}
+	if got.ServerLastSyncedFile != "CONTABILIDAD_20260115_1200.bak" {
+		t.Errorf("ServerLastSyncedFile no coincide")
+	}
+
+	got.SetPendingServer(true)
+	if !got.PendingSync.Server {
+		t.Errorf("tras SetPendingServer(true), PendingSync.Server debe ser true")
+	}
+}
+
+

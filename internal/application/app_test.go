@@ -417,4 +417,188 @@ func TestSaveAndGetR2Credentials(t *testing.T) {
 	}
 }
 
+func TestBackup_ServerRetryableError_SetsPendingSyncServer(t *testing.T) {
+	r2Backend := &mockBackend{name: "r2"}
+	serverBackend := &mockBackend{
+		name:      "server",
+		uploadErr: storage.NewRetryableError(errors.New("servidor UNC inaccesible")),
+	}
+
+	app, statePath, _ := setupTestApp(t, &mockSQLEngine{}, []storage.Backend{r2Backend, serverBackend})
+
+	ctx := context.Background()
+	err := app.Backup(ctx, BackupOptions{})
+	if !errors.Is(err, ErrPendingSync) {
+		t.Fatalf("esperaba ErrPendingSync, dio: %v", err)
+	}
+
+	st, err := state.Load(statePath)
+	if err != nil {
+		t.Fatalf("Load state falló: %v", err)
+	}
+
+	// Local debe ser exitoso
+	if st.LastBackupFile == "" || st.SHA256 == "" {
+		t.Errorf("backup local debió confirmarse en state")
+	}
+
+	// R2 exitoso (no pendiente)
+	if st.PendingSync.R2 {
+		t.Errorf("PendingSync.R2 debió ser false")
+	}
+	if st.R2LastSyncedFile == "" {
+		t.Errorf("R2LastSyncedFile debió registrarse")
+	}
+
+	// Server falló transitoriamente (pendiente)
+	if !st.PendingSync.Server {
+		t.Errorf("PendingSync.Server debió ser true")
+	}
+	if st.ServerLastSyncedFile != "" {
+		t.Errorf("ServerLastSyncedFile debió permanecer vacío")
+	}
+}
+
+func TestSync_ServerPendingSync_RetriesOnlyPending(t *testing.T) {
+	r2Backend := &mockBackend{name: "r2"}
+	serverBackend := &mockBackend{name: "server"}
+
+	app, statePath, _ := setupTestApp(t, &mockSQLEngine{}, []storage.Backend{r2Backend, serverBackend})
+
+	tmpFile := filepath.Join(t.TempDir(), "CONTABILIDAD_20260910_1000.bak")
+	_ = os.WriteFile(tmpFile, []byte("contenido-valido"), 0o644)
+
+	// Estado previo: R2 sincronizado, Server pendiente
+	_ = state.Save(statePath, &state.State{
+		LastRunDate:      "2026-09-10",
+		LastBackupFile:   tmpFile,
+		SHA256:           "hash123",
+		PendingSync:      state.PendingSync{R2: false, Server: true},
+		R2LastSyncedFile: "CONTABILIDAD_20260910_1000.bak",
+	})
+
+	err := app.Sync(context.Background(), SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync falló: %v", err)
+	}
+
+	// R2 no debió ser llamado porque ya estaba sincronizado
+	if r2Backend.uploadCalls != 0 {
+		t.Errorf("R2 no debió ser re-subido, llamadas=%d", r2Backend.uploadCalls)
+	}
+
+	// Server sí debió ser llamado
+	if serverBackend.uploadCalls != 1 {
+		t.Errorf("Server debió recibir 1 llamada de sync, recibió=%d", serverBackend.uploadCalls)
+	}
+
+	// Tras la sincronización, Server ya no debe estar pendiente
+	st, _ := state.Load(statePath)
+	if st.PendingSync.Server {
+		t.Errorf("PendingSync.Server debió ser false tras Sync exitoso")
+	}
+	if st.ServerLastSyncedFile != "CONTABILIDAD_20260910_1000.bak" {
+		t.Errorf("ServerLastSyncedFile no coincide: %s", st.ServerLastSyncedFile)
+	}
+}
+
+func TestBackup_PreSync_DeferredRetryBeforeDaily(t *testing.T) {
+	serverBackend := &mockBackend{name: "server"}
+	app, statePath, _ := setupTestApp(t, &mockSQLEngine{}, []storage.Backend{serverBackend})
+
+	oldBackup := filepath.Join(t.TempDir(), "CONTABILIDAD_20260909_1000.bak")
+	_ = os.WriteFile(oldBackup, []byte("backup-ayer"), 0o644)
+
+	_ = state.Save(statePath, &state.State{
+		LastRunDate:    "2026-09-09",
+		LastBackupFile: oldBackup,
+		SHA256:         "hash-ayer",
+		PendingSync:    state.PendingSync{Server: true},
+	})
+
+	// Ejecutar backup del día siguiente
+	err := app.Backup(context.Background(), BackupOptions{Force: true})
+	if err != nil {
+		t.Fatalf("Backup falló: %v", err)
+	}
+
+	// Server debió recibir 2 llamadas: 1 para el pendiente de ayer + 1 para el de hoy
+	if serverBackend.uploadCalls != 2 {
+		t.Errorf("esperaba 2 subidas al servidor (pendiente previo + nuevo del día), hubo %d", serverBackend.uploadCalls)
+	}
+
+	st, _ := state.Load(statePath)
+	if st.PendingSync.Server {
+		t.Errorf("PendingSync.Server debió quedar en false")
+	}
+}
+
+func TestGetTUIStatus_ServerConfiguredAndPending(t *testing.T) {
+	serverBackend := &mockBackend{name: "server"}
+	app, statePath, _ := setupTestApp(t, &mockSQLEngine{}, []storage.Backend{serverBackend})
+
+	tmpFile := filepath.Join(t.TempDir(), "CONTABILIDAD_20260910_1000.bak")
+	_ = os.WriteFile(tmpFile, []byte("ok"), 0o644)
+
+	// Caso: Server configurado y PENDING
+	_ = state.Save(statePath, &state.State{
+		LastRunDate:    "2026-09-10",
+		LastBackupFile: tmpFile,
+		PendingSync:    state.PendingSync{Server: true},
+	})
+
+	bStatus, backends, err := app.GetTUIStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetTUIStatus falló: %v", err)
+	}
+
+	if bStatus.Result != "pending_sync" {
+		t.Errorf("esperaba pending_sync por server pendiente, dio: %s", bStatus.Result)
+	}
+
+	var serverStatus BackendStatus
+	for _, b := range backends {
+		if b.Name == "Server" {
+			serverStatus = b
+			break
+		}
+	}
+
+	if !serverStatus.Configured {
+		t.Errorf("Server debería figurar como configurado")
+	}
+	if serverStatus.StatusText != "PENDING" {
+		t.Errorf("esperaba status PENDING para Server, dio: %s", serverStatus.StatusText)
+	}
+	if !serverStatus.PendingSync {
+		t.Errorf("PendingSync en ServerStatus debería ser true")
+	}
+
+	// Caso: Server OK
+	_ = state.Save(statePath, &state.State{
+		LastRunDate:          "2026-09-10",
+		LastBackupFile:       tmpFile,
+		PendingSync:          state.PendingSync{Server: false},
+		ServerLastSyncedFile: "CONTABILIDAD_20260910_1000.bak",
+	})
+
+	bStatus, backends, _ = app.GetTUIStatus(context.Background())
+	if bStatus.Result != "success" {
+		t.Errorf("esperaba success, dio: %s", bStatus.Result)
+	}
+	for _, b := range backends {
+		if b.Name == "Server" {
+			serverStatus = b
+			break
+		}
+	}
+	if serverStatus.StatusText != "OK" {
+		t.Errorf("esperaba status OK para Server, dio: %s", serverStatus.StatusText)
+	}
+	if !serverStatus.LastSyncOK {
+		t.Errorf("LastSyncOK en ServerStatus debería ser true")
+	}
+}
+
+
 

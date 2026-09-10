@@ -66,6 +66,9 @@ func TestLoad_InvalidValues_Errors(t *testing.T) {
 		{"server vacío", `{"server": ""}`},
 		{"backup_dir vacío", `{"backup_dir": ""}`},
 		{"timeout negativo", `{"login_timeout_sec": -1}`},
+		{"remote_server enabled sin path", `{"remote_server": {"enabled": true, "remote_path": ""}}`},
+		{"remote_server keep invalido", `{"remote_server": {"enabled": true, "remote_path": "\\\\srv\\share", "keep": 0}}`},
+		{"remote_server timeout negativo", `{"remote_server": {"enabled": true, "remote_path": "\\\\srv\\share", "timeout_sec": -1}}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -79,3 +82,34 @@ func TestLoad_InvalidValues_Errors(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoteServer_Valid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{
+		"remote_server": {
+			"enabled": true,
+			"remote_path": "\\\\Servidor\\Backups\\CONTABILIDAD",
+			"keep": 10,
+			"timeout_sec": 300
+		}
+	}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load falló para config válida de remote_server: %v", err)
+	}
+
+	if !cfg.RemoteServer.Enabled {
+		t.Errorf("esperaba remote_server.enabled == true")
+	}
+	if cfg.RemoteServer.RemotePath != `\\Servidor\Backups\CONTABILIDAD` {
+		t.Errorf("remote_path no coincide: %s", cfg.RemoteServer.RemotePath)
+	}
+	if cfg.RemoteServer.Keep != 10 {
+		t.Errorf("keep no coincide: %d", cfg.RemoteServer.Keep)
+	}
+}
+

@@ -5,10 +5,18 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 )
 
-// Config es toda la configuración de Fase 1. Sin secretos:
-// R2/Supabase vienen en fases posteriores (ahí se resuelve con DPAPI).
+// ServerStorageConfig define la configuración para copia a servidor remoto / recurso compartido.
+type ServerStorageConfig struct {
+	Enabled    bool   `json:"enabled"`
+	RemotePath string `json:"remote_path"`
+	Keep       int    `json:"keep"`
+	TimeoutSec int    `json:"timeout_sec"`
+}
+
+// Config es toda la configuración de Fase 1 y backends desacoplados.
 type Config struct {
 	// BackupDir es la ruta local donde se escriben los .bak.
 	// Debe ser una ruta local al servidor SQL (BACKUP DATABASE escribe
@@ -25,6 +33,8 @@ type Config struct {
 	// BackupTimeoutSec es el timeout máximo del BACKUP DATABASE.
 	// 0 = sin timeout (no recomendado; el Task Scheduler igual puede matar).
 	BackupTimeoutSec int `json:"backup_timeout_sec"`
+	// RemoteServer configura el almacenamiento remoto en servidor Windows / UNC (Fase 3).
+	RemoteServer ServerStorageConfig `json:"remote_server,omitempty"`
 }
 
 // Default devuelve la configuración de producción FEMUCARIBE.
@@ -36,6 +46,12 @@ func Default() Config {
 		Retain:           3,
 		LoginTimeoutSec:  15,
 		BackupTimeoutSec: 3600,
+		RemoteServer: ServerStorageConfig{
+			Enabled:    false,
+			RemotePath: "",
+			Keep:       10,
+			TimeoutSec: 300,
+		},
 	}
 }
 
@@ -103,6 +119,17 @@ func (c Config) Validate() error {
 	}
 	if c.BackupTimeoutSec < 0 {
 		return fmt.Errorf("config: backup_timeout_sec no puede ser negativo")
+	}
+	if c.RemoteServer.Enabled {
+		if strings.TrimSpace(c.RemoteServer.RemotePath) == "" {
+			return fmt.Errorf("config: remote_server.remote_path es obligatorio cuando enabled es true")
+		}
+		if c.RemoteServer.Keep < 1 {
+			return fmt.Errorf("config: remote_server.keep debe ser >= 1, recibí %d", c.RemoteServer.Keep)
+		}
+		if c.RemoteServer.TimeoutSec < 0 {
+			return fmt.Errorf("config: remote_server.timeout_sec no puede ser negativo")
+		}
 	}
 	return nil
 }
