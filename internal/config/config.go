@@ -16,6 +16,13 @@ type ServerStorageConfig struct {
 	TimeoutSec int    `json:"timeout_sec"`
 }
 
+// SupabaseConfig define la configuración para el registro centralizado de eventos en Supabase (Fase 4).
+type SupabaseConfig struct {
+	Enabled    bool   `json:"enabled"`
+	URL        string `json:"url"`
+	TimeoutSec int    `json:"timeout_sec"`
+}
+
 // Config es toda la configuración de Fase 1 y backends desacoplados.
 type Config struct {
 	// BackupDir es la ruta local donde se escriben los .bak.
@@ -35,6 +42,8 @@ type Config struct {
 	BackupTimeoutSec int `json:"backup_timeout_sec"`
 	// RemoteServer configura el almacenamiento remoto en servidor Windows / UNC (Fase 3).
 	RemoteServer ServerStorageConfig `json:"remote_server,omitempty"`
+	// Supabase configura el registro remoto de eventos (Fase 4).
+	Supabase SupabaseConfig `json:"supabase,omitempty"`
 }
 
 // Default devuelve la configuración de producción FEMUCARIBE.
@@ -51,6 +60,11 @@ func Default() Config {
 			RemotePath: "",
 			Keep:       10,
 			TimeoutSec: 300,
+		},
+		Supabase: SupabaseConfig{
+			Enabled:    false,
+			URL:        "",
+			TimeoutSec: 10,
 		},
 	}
 }
@@ -129,6 +143,17 @@ func (c Config) Validate() error {
 		}
 		if c.RemoteServer.TimeoutSec < 0 {
 			return fmt.Errorf("config: remote_server.timeout_sec no puede ser negativo")
+		}
+	}
+	if c.Supabase.Enabled {
+		if strings.TrimSpace(c.Supabase.URL) == "" {
+			return fmt.Errorf("config: supabase.url es obligatorio cuando enabled es true")
+		}
+		if !strings.HasPrefix(c.Supabase.URL, "http://") && !strings.HasPrefix(c.Supabase.URL, "https://") {
+			return fmt.Errorf("config: supabase.url debe ser una URL http o https válida")
+		}
+		if c.Supabase.TimeoutSec < 0 {
+			return fmt.Errorf("config: supabase.timeout_sec no puede ser negativo")
 		}
 	}
 	return nil
