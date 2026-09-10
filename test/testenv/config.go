@@ -7,6 +7,10 @@ import (
 
 // Config centraliza los parámetros de configuración para las pruebas de integración.
 type Config struct {
+	ProductionSQLServer  string
+	ProductionDatabase   string
+	ProductionBackupPath string
+
 	DatabaseDriver string
 	DatabasePath   string
 	BackupRoot     string
@@ -22,27 +26,11 @@ type Config struct {
 
 // LoadConfig carga la configuración de prueba desde variables de entorno con valores seguros por defecto.
 func LoadConfig() Config {
-	driver := os.Getenv("TEST_DATABASE_DRIVER")
-	if driver == "" {
-		driver = "sqlite"
-	}
-	dbPath := os.Getenv("TEST_DATABASE_PATH")
-	backupRoot := os.Getenv("TEST_BACKUP_ROOT")
-	if backupRoot == "" {
-		backupRoot = `C:\BackupsTest\`
-	}
+	envCfg := LoadTestEnvironmentConfig()
 
-	host := os.Getenv("TEST_SQLSERVER_HOST")
-	if host == "" {
-		host = "localhost"
-	}
 	port := 14333
 	if p, err := strconv.Atoi(os.Getenv("TEST_SQLSERVER_PORT")); err == nil && p > 0 {
 		port = p
-	}
-	database := os.Getenv("TEST_SQLSERVER_DATABASE")
-	if database == "" {
-		database = "CONTABILIDAD_TEST"
 	}
 	user := os.Getenv("TEST_SQLSERVER_USER")
 	if user == "" {
@@ -55,12 +43,16 @@ func LoadConfig() Config {
 	keepArtifacts := os.Getenv("KEEP_TEST_ARTIFACTS") == "true"
 
 	return Config{
-		DatabaseDriver:    driver,
-		DatabasePath:      dbPath,
-		BackupRoot:        backupRoot,
-		SQLServerHost:     host,
+		ProductionSQLServer:  envCfg.ProductionSQLServer,
+		ProductionDatabase:   envCfg.ProductionDatabase,
+		ProductionBackupPath: envCfg.ProductionBackupPath,
+
+		DatabaseDriver:    envCfg.DatabaseDriver,
+		DatabasePath:      os.Getenv("TEST_DATABASE_PATH"),
+		BackupRoot:        envCfg.TestBackupPath,
+		SQLServerHost:     envCfg.TestSQLServer,
 		SQLServerPort:     port,
-		SQLServerDatabase: database,
+		SQLServerDatabase: envCfg.TestDatabase,
 		SQLServerUser:     user,
 		SQLServerPassword: password,
 		KeepArtifacts:     keepArtifacts,
@@ -78,10 +70,13 @@ func (c Config) ToSafetyConfig() TestEnvironmentConfig {
 		dbName = "test_sqlite"
 	}
 	return TestEnvironmentConfig{
-		DatabaseDriver: c.DatabaseDriver,
-		DatabaseName:   dbName,
-		ServerInstance: server,
-		BackupRoot:     c.BackupRoot,
-		TestMode:       true,
+		ProductionSQLServer:  c.ProductionSQLServer,
+		ProductionDatabase:   c.ProductionDatabase,
+		ProductionBackupPath: c.ProductionBackupPath,
+		DatabaseDriver:       c.DatabaseDriver,
+		TestDatabase:         dbName,
+		TestSQLServer:        server,
+		TestBackupPath:       c.BackupRoot,
+		TestMode:             true,
 	}
 }

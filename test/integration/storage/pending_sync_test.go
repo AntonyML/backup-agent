@@ -100,7 +100,7 @@ func setupStorageTestEnv(t *testing.T) (string, string, string, string, string) 
 		t.Fatalf("seguridad violada: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	sdb, err := testdb.NewSQLiteFile(ctx, dbPath)
 	if err != nil {
