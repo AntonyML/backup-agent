@@ -64,6 +64,7 @@ func DefaultSQLEngine() SQLEngine {
 type App struct {
 	cfg          config.Config
 	statePath    string
+	secretsPath  string
 	lockPath     string
 	logDir       string
 	backends     []storage.Backend
@@ -75,6 +76,7 @@ type App struct {
 type Options struct {
 	Config       config.Config
 	StatePath    string
+	SecretsPath  string
 	LockPath     string
 	LogDir       string
 	Backends     []storage.Backend
@@ -95,6 +97,7 @@ func New(opts Options) *App {
 	return &App{
 		cfg:          opts.Config,
 		statePath:    opts.StatePath,
+		secretsPath:  opts.SecretsPath,
 		lockPath:     opts.LockPath,
 		logDir:       opts.LogDir,
 		backends:     opts.Backends,
@@ -103,3 +106,4 @@ func New(opts Options) *App {
 		logger:       log,
 	}
 }
+

@@ -336,3 +336,85 @@ func TestAtomicRename(t *testing.T) {
 	}
 }
 
+func TestGetTUIStatus(t *testing.T) {
+	mockR2 := &mockBackend{name: "r2"}
+	app, statePath, _ := setupTestApp(t, &mockSQLEngine{}, []storage.Backend{mockR2})
+
+	// Caso 1: Never run
+	bStatus, backends, err := app.GetTUIStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetTUIStatus falló: %v", err)
+	}
+	if bStatus.Result != "never_run" {
+		t.Errorf("esperaba never_run, dio: %s", bStatus.Result)
+	}
+	if len(backends) != 3 {
+		t.Fatalf("esperaba 3 backends (Local, R2, Server), dio %d", len(backends))
+	}
+	if backends[0].Name != "Local" || backends[1].Name != "R2" || backends[2].Name != "Server" {
+		t.Errorf("nombres de backends inesperados: %+v", backends)
+	}
+	if backends[2].Configured {
+		t.Errorf("Server debería figurar como no configurado")
+	}
+
+	// Caso 2: Con estado exitoso
+	tmpFile := filepath.Join(t.TempDir(), "CONTABILIDAD_20260910_1000.bak")
+	_ = os.WriteFile(tmpFile, []byte("ok"), 0o644)
+	_ = state.Save(statePath, &state.State{
+		LastRunDate:      "2026-09-10",
+		LastBackupFile:   tmpFile,
+		SHA256:           "hash123",
+		PendingSync:      state.PendingSync{R2: false},
+		R2LastSyncedFile: "CONTABILIDAD_20260910_1000.bak",
+	})
+
+	bStatus, backends, err = app.GetTUIStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetTUIStatus falló: %v", err)
+	}
+	if bStatus.Result != "success" {
+		t.Errorf("esperaba success, dio: %s", bStatus.Result)
+	}
+	if backends[1].StatusText != "OK" {
+		t.Errorf("esperaba R2 OK, dio: %s", backends[1].StatusText)
+	}
+
+	// Caso 3: Con pending_sync
+	_ = state.Save(statePath, &state.State{
+		LastRunDate:    "2026-09-10",
+		LastBackupFile: tmpFile,
+		PendingSync:    state.PendingSync{R2: true},
+	})
+	bStatus, backends, _ = app.GetTUIStatus(context.Background())
+	if bStatus.Result != "pending_sync" {
+		t.Errorf("esperaba pending_sync, dio: %s", bStatus.Result)
+	}
+	if backends[1].StatusText != "PENDING" {
+		t.Errorf("esperaba R2 PENDING, dio: %s", backends[1].StatusText)
+	}
+}
+
+func TestSaveAndGetR2Credentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	datPath := filepath.Join(tmpDir, "config.dat")
+
+	app := New(Options{
+		SecretsPath: datPath,
+	})
+
+	err := app.SaveR2Credentials("https://example.r2.cloudflarestorage.com", "my-bucket", "accKey", "secKey")
+	if err != nil {
+		t.Fatalf("SaveR2Credentials falló: %v", err)
+	}
+
+	creds, err := app.GetR2Credentials()
+	if err != nil {
+		t.Fatalf("GetR2Credentials falló: %v", err)
+	}
+	if creds.Endpoint != "https://example.r2.cloudflarestorage.com" || creds.Bucket != "my-bucket" || creds.AccessKeyID != "accKey" || creds.SecretAccessKey != "secKey" {
+		t.Errorf("credenciales recuperadas no coinciden: %+v", creds)
+	}
+}
+
+

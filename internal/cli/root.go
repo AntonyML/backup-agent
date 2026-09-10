@@ -118,12 +118,14 @@ func BuildDefaultApp(exeDir string, cfgPath string) (*application.App, error) {
 	return application.New(application.Options{
 		Config:       cfg,
 		StatePath:    statePath,
+		SecretsPath:  datPath,
 		LockPath:     lockPath,
 		LogDir:       filepath.Join(exeDir, "logs"),
 		Backends:     backends,
 		LocalBackend: localBackend,
 		Logger:       logger,
 	}), nil
+
 }
 
 // ExitCodeForError traduce errores a códigos de salida centralizados.
