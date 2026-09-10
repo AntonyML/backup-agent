@@ -29,3 +29,8 @@ func (f *DatabaseFactory) SQLiteMemory(ctx context.Context) (TestDatabase, error
 func (f *DatabaseFactory) SQLiteFile(ctx context.Context, filePath string) (TestDatabase, error) {
 	return NewSQLiteFile(ctx, filePath)
 }
+
+func (f *DatabaseFactory) SQLServer(ctx context.Context, cfg SQLServerConfig) (TestDatabase, error) {
+	return NewSQLServer(ctx, cfg)
+}
+
