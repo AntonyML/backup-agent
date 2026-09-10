@@ -239,21 +239,75 @@ Get-Content C:\Agente\logs\agent-2026-09-10.log -Wait
 
 ---
 
-## Verificación y Tests
+---
+
+## Testing e Infraestructura de Pruebas (Fase 2.3)
+
+> [!CAUTION]
+> ### ⚠️ TESTING SAFETY
+>
+> Los tests **NUNCA** deben ejecutarse contra recursos de producción:
+> - **Instancia:** `Caproba01\vbadilla`
+> - **Base de datos:** `CONTABILIDAD`
+> - **Directorio:** `C:\Backups\`
+>
+> La infraestructura de testing cuenta con un guardián programático estricto ([`testenv.ValidateSafety`](file:///c:/DEV/femucaribe-backup-agent/test/testenv/safety.go)) que valida antes de cada prueba que ni el host, ni la base, ni las rutas apunten a producción. Si detecta alguno de estos valores en modo test, **aborta la ejecución inmediatamente**.
+
+### Estrategia de Testing y Motores
+
+El sistema separa estrictamente dos niveles de pruebas de integración:
+
+1. **Suite Rápida Aislada (SQLite)**:
+   - Utiliza `modernc.org/sqlite` (Go puro, sin requerir CGO/GCC en Windows).
+   - Valida el ciclo de vida completo de la aplicación en milisegundos: creación de base, aplicación del seed determinístico, generación de `.bak`, verificación de hash SHA-256, consistencia de `state.json`, rotación local, resiliencia ante `kill` mediante failpoints (`TEST_FAILPOINT=after_backup_started`), y restauración con comparación de snapshots determinísticos (`AssertDatabaseEquivalent`).
+   - Se ejecuta con el comando estándar sin requerir Docker ni servicios externos.
+
+2. **Integración con SQL Server Aislado (Docker / Tag `sqlserver`)**:
+   - Levanta una instancia de SQL Server 2022 en un contenedor Docker en el puerto aislado `14333` con credenciales de prueba.
+   - Valida específicamente comandos nativos de SQL Server: `BACKUP DATABASE ... WITH COMPRESSION, CHECKSUM`, `RESTORE VERIFYONLY`, lectura de layout físico con `RESTORE FILELISTONLY`, y restauración a base temporal secundaria (`CONTABILIDAD_TEST_RESTORE`).
+
+### Dataset Determinístico (Fixtures de Seed)
+
+Los tests utilizan un dataset determinístico formal ubicado en `test/fixtures/seed/`:
+- **`customers`**: 10 registros con claves primarias y caracteres especiales.
+- **`accounts`**: 20 cuentas bancarias vinculadas.
+- **`invoices`**: 50 facturas con montos, fechas y estados.
+- **`transactions`**: 200 transacciones para verificar consistencia relacional e integridad total tras restauración.
+
+### Comandos de Ejecución de Pruebas
+
+#### 1. Suite Rápida Completa (Unitarios + Integración SQLite + Resiliencia)
+No requiere Docker ni dependencias externas. Se completa en ~2 segundos:
 
 ```powershell
-# Análisis estático
-go vet ./...
-
-# Suite completa de pruebas unitarias sin caché
-go test -count=1 -v ./...
+go test -count=1 ./...
 ```
 
-Cubre:
-- Pruebas del modelo TUI Bubble Tea v2 (`internal/ui/ui_test.go`), transiciones entre pantallas y renderizado de backends.
-- Test estático AST de arquitectura (garantía de que `internal/ui` nunca importa `storage` ni `state`).
-- Comandos Cobra y parsing de flags (`internal/cli`).
-- Casos de uso de la capa de aplicación con mocks (`internal/application`).
-- Aislamiento de la interfaz `Backend` y clasificación con `RetryableError`.
-- Descarte de archivos temporales huérfanos (`.bak.tmp`) y renombrado atómico.
-- Cifrado DPAPI y persistencia segura de credenciales (`internal/secrets`).
+#### 2. Tests con SQL Server Aislado en Docker
+Requiere Docker Desktop en ejecución:
+
+```powershell
+# Levantar SQL Server de pruebas, esperar TCP y ejecutar la suite completa:
+.\scripts\test-sqlserver.ps1
+
+# O manualmente:
+docker compose -f docker/sqlserver/docker-compose.yml up -d
+go test -v -tags=sqlserver ./test/integration/sqlserver/...
+docker compose -f docker/sqlserver/docker-compose.yml down
+```
+
+#### 3. Limpieza de Artefactos de Prueba
+Elimina de forma segura carpetas temporales en `C:\BackupsTest\` protegiendo categóricamente `C:\Backups\`:
+
+```powershell
+.\scripts\cleanup-test.ps1
+```
+
+#### 4. Conservación de Artefactos para Diagnóstico
+Si se desea inspeccionar los archivos generados tras una falla:
+
+```powershell
+$env:KEEP_TEST_ARTIFACTS="true"
+go test ./...
+```
+
