@@ -273,3 +273,66 @@ func TestTailLogs(t *testing.T) {
 		t.Errorf("última línea incorrecta: %s", lines[2])
 	}
 }
+
+func TestRemoveTmpOrphans_KillRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	mustWrite := func(name string) {
+		if err := os.WriteFile(filepath.Join(tmpDir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("CONTABILIDAD_20260101_1200.bak")
+	mustWrite("CONTABILIDAD_20260102_1200.bak.tmp")
+	mustWrite("state.json")
+
+	app := New(Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	n, err := app.removeTmpOrphans(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("debería borrar 1 huérfano, borró %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "CONTABILIDAD_20260101_1200.bak")); err != nil {
+		t.Error("el .bak final no debe tocarse")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "CONTABILIDAD_20260102_1200.bak.tmp")); err == nil {
+		t.Error("el .tmp huérfano debería haber sido borrado")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "state.json")); err != nil {
+		t.Error("state.json no debe tocarse")
+	}
+}
+
+func TestAtomicRename(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "a.bak.tmp")
+	dst := filepath.Join(dir, "a.bak")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicRename(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(src); err == nil {
+		t.Error("rename debería mover src")
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Error("rename debería crear dst")
+	}
+
+	// Con destino existente: reemplaza.
+	if err := os.WriteFile(src, []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicRename(src, dst); err != nil {
+		t.Fatalf("rename con destino existente: %v", err)
+	}
+	content, _ := os.ReadFile(dst)
+	if string(content) != "y" {
+		t.Errorf("debería haber reemplazado el contenido")
+	}
+}
+
