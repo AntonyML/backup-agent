@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -28,7 +30,10 @@ type Config struct {
 	RemotePath string `json:"remote_path"`
 	Keep       int    `json:"keep"`
 	TimeoutSec int    `json:"timeout_sec"`
+	Database   string `json:"database,omitempty"`
 }
+
+var backupPatternRe = regexp.MustCompile(`^([A-Za-z0-9_]+)_(\d{8}_\d{4})\.bak$`)
 
 // DefaultConfig devuelve la configuración por defecto para ServerBackend.
 func DefaultConfig() Config {
@@ -37,6 +42,7 @@ func DefaultConfig() Config {
 		RemotePath: ``,
 		Keep:       DefaultKeep,
 		TimeoutSec: DefaultTimeoutSec,
+		Database:   "",
 	}
 }
 
@@ -128,8 +134,8 @@ func (b *Backend) Upload(ctx context.Context, localPath string) error {
 	finalTarget := filepath.Join(b.cfg.RemotePath, filename)
 	tmpTarget := finalTarget + ".tmp"
 
-	// Limpiar temporal previo si existiera
-	_ = os.Remove(tmpTarget)
+	// Limpieza preventiva de temporales huérfanos previos
+	_, _ = b.CleanOrphanTmp(opCtx)
 
 	b.logger.Info("iniciando copia a servidor remoto",
 		"backend", b.Name(),
@@ -186,7 +192,97 @@ func (b *Backend) Upload(ctx context.Context, localPath string) error {
 	return nil
 }
 
-// Rotate ejecuta la rotación de archivos conservando como máximo keep copias.
+// CleanOrphanTmp elimina archivos temporales (.tmp) huérfanos en el directorio del servidor.
+func (b *Backend) CleanOrphanTmp(ctx context.Context) ([]string, error) {
+	if !b.cfg.Enabled {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(b.cfg.RemotePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, storage.NewRetryableError(fmt.Errorf("server: leer directorio remoto para limpieza: %w", err))
+	}
+
+	var cleaned []string
+	var errs []error
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(strings.ToLower(name), ".tmp") {
+			fullPath := filepath.Join(b.cfg.RemotePath, name)
+			if err := os.Remove(fullPath); err != nil {
+				errs = append(errs, fmt.Errorf("limpiar %s: %w", name, err))
+			} else {
+				cleaned = append(cleaned, name)
+			}
+		}
+	}
+
+	if len(cleaned) > 0 {
+		b.logger.Info("archivos temporales huérfanos limpiados en servidor",
+			"backend", b.Name(),
+			"cantidad", len(cleaned),
+			"archivos", cleaned)
+	}
+
+	if len(errs) > 0 {
+		return cleaned, errors.Join(errs...)
+	}
+	return cleaned, nil
+}
+
+func (b *Backend) isValidBackupFileName(name string) bool {
+	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, ".tmp") {
+		return false
+	}
+	match := backupPatternRe.FindStringSubmatch(name)
+	if match == nil {
+		return false
+	}
+	dbPart := match[1]
+	datePart := match[2]
+
+	if b.cfg.Database != "" && dbPart != b.cfg.Database {
+		return false
+	}
+
+	if _, err := time.Parse("20060102_1504", datePart); err != nil {
+		return false
+	}
+
+	return true
+}
+
+func (b *Backend) listValidBackups() ([]string, error) {
+	entries, err := os.ReadDir(b.cfg.RemotePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var valid []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !b.isValidBackupFileName(name) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.Size() <= 0 {
+			continue
+		}
+		valid = append(valid, name)
+	}
+	return valid, nil
+}
+
+// Rotate ejecuta la rotación de archivos conservando como máximo keep copias válidas.
 func (b *Backend) Rotate(ctx context.Context, keep int) error {
 	if !b.cfg.Enabled {
 		return nil
@@ -203,12 +299,31 @@ func (b *Backend) Rotate(ctx context.Context, keep int) error {
 		"keep", keep,
 		"directorio", b.cfg.RemotePath)
 
-	deleted, err := rotation.Rotate(b.cfg.RemotePath, keep)
+	validFiles, err := b.listValidBackups()
 	if err != nil {
-		b.logger.Warn("rotación en servidor parcialmente fallida",
+		if os.IsNotExist(err) {
+			return nil
+		}
+		b.logger.Warn("rotación en servidor fallida al listar",
 			"backend", b.Name(),
 			"error", err)
-		return fmt.Errorf("server: rotación: %w", err)
+		return storage.NewRetryableError(fmt.Errorf("server: listar para rotación: %w", err))
+	}
+
+	toDelete, err := rotation.Plan(validFiles, keep)
+	if err != nil {
+		return fmt.Errorf("server: plan de rotación: %w", err)
+	}
+
+	var deleted []string
+	var delErrs []error
+	for _, name := range toDelete {
+		full := filepath.Join(b.cfg.RemotePath, name)
+		if err := os.Remove(full); err != nil {
+			delErrs = append(delErrs, fmt.Errorf("borrar %s: %w", name, err))
+		} else {
+			deleted = append(deleted, name)
+		}
 	}
 
 	if len(deleted) > 0 {
@@ -218,15 +333,22 @@ func (b *Backend) Rotate(ctx context.Context, keep int) error {
 			"archivos", deleted)
 	}
 
+	if len(delErrs) > 0 {
+		b.logger.Warn("rotación en servidor parcialmente fallida",
+			"backend", b.Name(),
+			"errores", errors.Join(delErrs...))
+		return fmt.Errorf("server: rotación: %w", errors.Join(delErrs...))
+	}
+
 	return nil
 }
 
-// LatestRemote devuelve el nombre del backup más reciente en el servidor.
+// LatestRemote devuelve el nombre del backup válido más reciente en el servidor.
 func (b *Backend) LatestRemote(ctx context.Context) (string, error) {
 	if !b.cfg.Enabled {
 		return "", nil
 	}
-	entries, err := os.ReadDir(b.cfg.RemotePath)
+	validFiles, err := b.listValidBackups()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
@@ -234,23 +356,12 @@ func (b *Backend) LatestRemote(ctx context.Context) (string, error) {
 		return "", storage.NewRetryableError(fmt.Errorf("server: listar %s: %w", b.cfg.RemotePath, err))
 	}
 
-	var baks []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if strings.HasSuffix(strings.ToLower(name), ".bak") && !strings.HasSuffix(strings.ToLower(name), ".tmp") {
-			baks = append(baks, name)
-		}
-	}
-
-	if len(baks) == 0 {
+	if len(validFiles) == 0 {
 		return "", nil
 	}
 
-	sort.Strings(baks)
-	return baks[len(baks)-1], nil
+	sort.Strings(validFiles)
+	return validFiles[len(validFiles)-1], nil
 }
 
 func copyFileWithContext(ctx context.Context, srcPath, dstPath string) error {
