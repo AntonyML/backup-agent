@@ -1,11 +1,12 @@
-# FEMUCARIBE Backup Agent — Fase 1, 2, 2.1 & 2.2
+# FEMUCARIBE Backup Agent — Fase 1, 2, 2.1, 2.2 & 3
 
-Agente de backups para SQL Server `CONTABILIDAD` con arquitectura hexagonal limpia, interfaz gráfica de terminal moderna (**TUI** con Bubble Tea v2, Bubbles v2, Lip Gloss v2 y Glamour v2), subida a **Cloudflare R2** (S3 compatible), protección de credenciales con **Windows DPAPI** y soporte para ejecución desatendida vía Windows Task Scheduler.
+Agente de backups para SQL Server `CONTABILIDAD` con arquitectura hexagonal limpia, interfaz gráfica de terminal moderna (**TUI** con Bubble Tea v2, Bubbles v2, Lip Gloss v2 y Glamour v2), subida a **Cloudflare R2** (S3 compatible), copia segura a **Servidor Remoto Windows / UNC** con rotación a 10 copias, protección de credenciales con **Windows DPAPI** y soporte para ejecución desatendida vía Windows Task Scheduler.
 
 - **Fase 1:** Backup local en `C:\Backups\`, verificación `RESTORE VERIFYONLY`, hash SHA-256 por streaming, lock file contra concurrencia y rotación local (3 copias).
-- **Fase 2:** Subida a **Cloudflare R2** con verificación de integridad por tamaño, rotación remota a 1 copia, gestión segura de credenciales vía **Windows DPAPI** (`config.dat`) y tolerancia a fallos con `pending_sync`.
+- **Fase 2:** Subida a **Cloudflare R2** con verificación de integridad por tamaño, rotación remota a 1 copia, gestión segura de credenciales vía **Windows DPAPI** (`config.dat`) y tolerancia a fallos con `pending_sync.r2`.
 - **Fase 2.1:** Refactor transversal: CLI con **Cobra**, desacoplamiento total de la capa de aplicación (`internal/application/`), interfaz de almacenamiento (`storage.Backend`), clasificación de errores (`RetryableError`), logging estructurado con `log/slog` y códigos de salida centralizados.
 - **Fase 2.2:** **Dashboard TUI completo**: Interfaz de terminal enriquecida con Bubble Tea v2, Bubbles v2 (viewport, textinput, spinner), Lip Gloss v2 y Glamour v2. Ejecución asíncrona sin bloquear el event loop, visor de logs con scroll, formulario de credenciales protegido y manual de ayuda integrado.
+- **Fase 3:** **Copia a Servidor Remoto / Recurso Compartido (UNC)**: Transferencia segura mediante archivo temporal `.bak.tmp`, verificación estricta de integridad (doble validación de tamaño idéntico y SHA-256 por streaming), renombrado atómico, rotación de 10 copias más recientes, tolerancia a fallos con `pending_sync.server` y no destrucción de backups previos.
 
 ---
 
@@ -46,7 +47,7 @@ femucaribe-backup-agent/
 │   ├── application/             # Casos de uso de negocio (100% desacoplados de Cobra, TUI y TTY)
 │   │   ├── app.go               # Orquestador del ciclo de vida y constructor de dependencias
 │   │   ├── backup.go            # Pipeline completo de backup
-│   │   ├── sync.go              # Reintento de sincronizaciones pendientes
+│   │   ├── sync.go              # Reintento de sincronizaciones pendientes (R2 + Server)
 │   │   ├── status.go            # Consulta de estado consolidado
 │   │   ├── logs.go              # Lectura de registros del día
 │   │   ├── dto.go               # DTOs de presentación para la TUI
@@ -55,7 +56,8 @@ femucaribe-backup-agent/
 │   ├── storage/                 # Abstracción de destinos de almacenamiento
 │   │   ├── backend.go           # Interfaz Backend y RetryableError
 │   │   ├── local/               # Backend de almacenamiento local en disco
-│   │   └── r2/                  # Backend de Cloudflare R2 (S3 compatible)
+│   │   ├── r2/                  # Backend de Cloudflare R2 (S3 compatible)
+│   │   └── server/              # Backend para servidor remoto Windows / UNC (Fase 3)
 │   ├── secrets/                 # Cifrado DPAPI (Windows) y gestión de config.dat
 │   ├── logging/                 # Logging estructurado con log/slog y rotación diaria
 │   ├── config/                  # Carga y validación de config.json
@@ -87,9 +89,9 @@ El agente busca junto al binario:
 
 | Archivo       | Tipo / Formato | Descripción |
 |---------------|----------------|-------------|
-| `config.json` | JSON (texto)   | Parámetros locales opcionales: `backup_dir`, `server`, `database`, `retain` (default 3), timeouts. |
+| `config.json` | JSON (texto)   | Parámetros locales y remotos: `backup_dir`, `server`, `database`, `retain` (local, default 3), `remote_server` (`enabled`, `remote_path`, `keep` default 10, `timeout_sec`). |
 | `config.dat`  | Binario cifrado| Credenciales de R2 cifradas con Windows DPAPI: Endpoint, Bucket, Access Key, Secret Key. |
-| `state.json`  | JSON (texto)   | Estado persistente: `last_run_date`, `last_backup_file`, `sha256`, `pending_sync.r2`, `r2_last_synced_file`. |
+| `state.json`  | JSON (texto)   | Estado persistente: `last_run_date`, `last_backup_file`, `sha256`, `pending_sync` (`r2`, `server`), `r2_last_synced_file`, `server_last_synced_file`. |
 | `agent.lock`  | Texto con PID  | Lock file para evitar ejecuciones concurrentes y reclamar instancias muertas. |
 | `logs/`       | Directorio     | Archivos de log rotativos diarios: `agent-YYYY-MM-DD.log`. |
 
@@ -212,8 +214,90 @@ Al ejecutar `backup-agent.exe` en una consola o terminal interactiva (o mediante
 | **`0`** | `ExitOK`          | Operación completada con éxito o backup ya realizado el día de hoy (idempotencia). |
 | **`1`** | `ExitGeneralErr`  | Error general de ejecución (fallo en SQL, error de I/O, sin TTY en comando raíz). |
 | **`2`** | `ExitConfigErr`   | Configuración inválida, faltante o sintaxis corrupta (`config.json`). |
-| **`3`** | `ExitPendingSync` | Backup local creado y verificado con éxito, pero la subida a R2 falló (quedó en `pending_sync`). |
+| **`3`** | `ExitPendingSync` | Backup local creado y verificado con éxito, pero la transferencia remota (R2 o Servidor Remoto UNC) falló o quedó diferida en `pending_sync`. |
 | **`4`** | `ExitLocked`      | Otra instancia del agente se encuentra en ejecución (`agent.lock` activo con PID vivo). |
+
+---
+
+## Almacenamiento en Servidor Remoto / Recurso Compartido UNC (Fase 3)
+
+### Configuración en `config.json`
+
+Para activar la réplica secundaria hacia un servidor de almacenamiento en red o recurso compartido Windows:
+
+```json
+{
+  "backup_dir": "C:\\Backups\\",
+  "server": "Caproba01\\vbadilla",
+  "database": "CONTABILIDAD",
+  "retain": 3,
+  "login_timeout_sec": 15,
+  "backup_timeout_sec": 3600,
+  "remote_server": {
+    "enabled": true,
+    "remote_path": "\\\\ServidorBackup\\Backups\\CONTABILIDAD\\",
+    "keep": 10,
+    "timeout_sec": 300
+  }
+}
+```
+
+| Parámetro | Tipo | Requerido | Descripción |
+|---|---|---|---|
+| `enabled` | `bool` | Sí | Activa (`true`) o desactiva (`false`) el backend de servidor remoto. |
+| `remote_path` | `string` | Sí (si `enabled=true`) | Ruta UNC o directorio destino absoluto en el servidor remoto. |
+| `keep` | `int` | Opcional (default `10`) | Cantidad máxima de copias históricas a conservar en el servidor remoto (mínimo 1). |
+| `timeout_sec` | `int` | Opcional (default `300`) | Tiempo límite en segundos para la transferencia completa y validación de hash. |
+
+### Rutas UNC vs. Unidades Mapeadas (`Z:\`) en Windows Task Scheduler
+
+> [!WARNING]
+> ### ⚠️ Uso Obligatorio de Rutas UNC
+> 
+> En entornos Windows Server y estaciones de trabajo, las unidades de red mapeadas con letra de unidad (por ejemplo `Z:\` o `X:\`) **pertenecen exclusivamente a la sesión interactiva del usuario que inició sesión**.
+> 
+> Cuando el agente se ejecuta de forma desatendida mediante el **Programador de Tareas de Windows (Task Scheduler)** o como servicio:
+> 1. La sesión no interactiva **no monta** las unidades mapeadas del explorador.
+> 2. Intentar escribir en `Z:\Backups\` resultará en un error `The system cannot find the path specified` (error 3 de Win32).
+> 
+> **Regla de Arquitectura**: Debe configurarse **siempre una ruta UNC válida** (ej: `\\ServidorBackup\Backups\CONTABILIDAD\`). La cuenta de servicio de Windows bajo la cual corre la tarea programada debe tener permisos NTFS y de red de lectura/escritura sobre el recurso compartido (`Share`).
+
+### Mecánica de Copia Segura y Doble Integridad
+
+Para evitar que una caída de red o corte eléctrico deje un backup a medio transferir o corrompa archivos existentes:
+
+1. **Limpieza preventiva de huérfanos**: Antes de iniciar una copia, el backend detecta y purga cualquier archivo temporal huérfano (`.tmp`) perteneciente a la base de datos actual para liberar espacio.
+2. **Transferencia a archivo temporal (`.bak.tmp`)**: Se escribe inicialmente bajo el sufijo temporal `CONTABILIDAD_YYYYMMDD_HHMM.bak.tmp`.
+3. **Doble verificación de integridad**:
+   - **Tamaño idéntico**: Valida que los bytes transferidos coincidan byte por byte con el backup local.
+   - **SHA-256 por streaming**: Lee el archivo remoto temporal calculando su hash criptográfico y asegurando que coincida exactamente con el SHA-256 local verificado.
+4. **Renombrado Atómico**: Únicamente cuando la verificación es 100% exitosa, el archivo temporal se renombra a su nombre definitivo `.bak`. Si la verificación falla o la red se interrumpe, el archivo temporal se destruye y el archivo definitivo jamás se crea.
+
+### Política de Rotación y Retención (Máximo 10 Copias)
+
+- **Aislamiento estricto**: La rotación sólo afecta a los archivos con el patrón `<DATABASE>_YYYYMMDD_HHMM.bak`. Archivos temporales (`.tmp`), archivos de 0 bytes o backups de otras bases de datos son completamente ignorados.
+- **No destrucción previa**: Las copias más antiguas **nunca se eliminan antes** de que la nueva copia haya sido transferida, verificada y renombrada exitosamente.
+- **Criterio de ordenamiento**: Se ordenan cronológicamente por la fecha y hora extraída del nombre (`YYYYMMDD_HHMM`). Si existen más de `keep` copias (por defecto 10), se eliminan exclusivamente las más antiguas hasta dejar exactamente 10.
+
+### Tolerancia a Fallos, `pending_sync.server` y Recuperación
+
+Si durante el ciclo diario de backup el servidor remoto no responde o la red falla:
+1. El backup local ya completado y verificado permanece intacto y protegido.
+2. El agente marca atómicamente en `state.json`:
+   ```json
+   "pending_sync": {
+     "r2": false,
+     "server": true
+   }
+   ```
+3. El agente registra el error como `RetryableError` y finaliza con código de salida `3` (`ExitPendingSync`).
+4. **Recuperación Automática**:
+   - Al día siguiente o en la próxima ejecución programada de `backup`, el agente detecta el flag pendiente y reintenta transferir el backup al servidor remoto **antes** de generar el nuevo backup diario.
+   - Alternativamente, los administradores pueden disparar la recuperación manual o desatendida mediante el subcomando:
+     ```powershell
+     .\bin\backup-agent.exe sync
+     ```
+     El comando `sync` es idempotente e independiente: si R2 ya estaba sincronizado, **no vuelve a subir a R2**, sino que atiende exclusivamente al backend pendiente (`server`).
 
 ---
 
@@ -296,18 +380,30 @@ go test -v -tags=sqlserver ./test/integration/sqlserver/...
 docker compose -f docker/sqlserver/docker-compose.yml down
 ```
 
-#### 3. Limpieza de Artefactos de Prueba
+#### 3. Tests de Integración de Almacenamiento Remoto / Servidor UNC (Fase 3)
+Valida el pipeline completo end-to-end simulando un servidor remoto en un filesystem aislado:
+- Transferencia con `.tmp`, verificación estricta de tamaño y SHA-256 por streaming, y renombrado atómico.
+- Purgado de temporales huérfanos tras interrupciones previas.
+- Conservación de backups previos ante caídas de red y recuperación diferida con `app.Sync()`.
+- Pipeline dual simultáneo (Cloudflare R2 + Servidor Remoto con políticas de retención independientes).
+
+```powershell
+go test -v -count=1 ./test/integration/storage/...
+```
+
+#### 4. Limpieza de Artefactos de Prueba
 Elimina de forma segura carpetas temporales en `C:\BackupsTest\` protegiendo categóricamente `C:\Backups\`:
 
 ```powershell
 .\scripts\cleanup-test.ps1
 ```
 
-#### 4. Conservación de Artefactos para Diagnóstico
+#### 5. Conservación de Artefactos para Diagnóstico
 Si se desea inspeccionar los archivos generados tras una falla:
 
 ```powershell
 $env:KEEP_TEST_ARTIFACTS="true"
 go test ./...
 ```
+
 
