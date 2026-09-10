@@ -15,8 +15,10 @@ import (
 	"femucaribe-backup-agent/internal/lock"
 	"femucaribe-backup-agent/internal/logger"
 	"femucaribe-backup-agent/internal/rotation"
+	"femucaribe-backup-agent/internal/secrets"
 	"femucaribe-backup-agent/internal/sqlbackup"
 	"femucaribe-backup-agent/internal/state"
+	"femucaribe-backup-agent/internal/storage/r2"
 )
 
 const (
@@ -26,16 +28,24 @@ const (
 )
 
 func main() {
-	os.Exit(run())
+	os.Exit(run(os.Args[1:]))
 }
 
-// run ejecuta una corrida batch de vida corta. Devuelve el exit code
-// (0 ok o ya-hecho-hoy, 1 error, 2 lock ajeno) sin llamar os.Exit,
-// para que sea testeable.
-func run() int {
-	force := flag.Bool("force", false, "forzar corrida manual aunque ya exista backup de hoy")
-	configPath := flag.String("config", "", "ruta a config.json (default: config.json junto al binario)")
-	flag.Parse()
+// run ejecuta una corrida batch de vida corta o subcomandos de configuración.
+// Devuelve el exit code (0 ok o ya-hecho-hoy, 1 error, 2 lock ajeno) sin llamar os.Exit.
+func run(args []string) int {
+	if len(args) > 0 {
+		if args[0] == "configure" || (args[0] == "agent" && len(args) > 1 && args[1] == "configure") {
+			return runConfigure(exeDir())
+		}
+	}
+
+	fs := flag.NewFlagSet("backup-agent", flag.ContinueOnError)
+	force := fs.Bool("force", false, "forzar corrida manual aunque ya exista backup de hoy")
+	configPath := fs.String("config", "", "ruta a config.json (default: config.json junto al binario)")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
 
 	exeDir := exeDir()
 	cfgPath := *configPath
@@ -89,6 +99,33 @@ func run() int {
 	if err != nil {
 		log.Errorf("state.json corrupto, lo trato como primera corrida: %v", err)
 		st = &state.State{}
+	}
+
+	// Sincronización pendiente a R2: intentar sincronizar el archivo pendiente ANTES
+	// de generar un backup nuevo del día.
+	if st.PendingSync.R2 && st.LastBackupFile != "" {
+		log.Infof("arranque: detectada sincronización pendiente a R2 para %s", st.LastBackupFile)
+		if _, err := os.Stat(st.LastBackupFile); err == nil {
+			r2Ctx, r2Cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			r2Client, err := getR2Client(r2Ctx, exeDir)
+			if err != nil {
+				log.Errorf("sincronización pendiente a R2: no se pudo inicializar cliente: %v", err)
+			} else {
+				if err := syncToR2(r2Ctx, r2Client, cfg.Database, st.LastBackupFile, log); err != nil {
+					log.Errorf("falló sincronización pendiente a R2: %v", err)
+				} else {
+					st.MarkR2Synced(filepath.Base(st.LastBackupFile))
+					if err := state.Save(statePath, st); err != nil {
+						log.Errorf("no se pudo guardar state.json tras sync pendiente: %v", err)
+					}
+				}
+			}
+			r2Cancel()
+		} else {
+			log.Warnf("el archivo de backup pendiente %s no existe en disco; se descarta el pendiente", st.LastBackupFile)
+			st.SetPendingR2(false)
+			_ = state.Save(statePath, st)
+		}
 	}
 
 	// Idempotencia diaria: una sola copia válida por día.
@@ -165,8 +202,7 @@ func run() int {
 		return exitError
 	}
 
-	// Estado: solo después de copia válida. La fecha se toma al completar
-	// (una corrida que cruza medianoche cuenta para el día nuevo).
+	// Estado: solo después de copia válida.
 	st.LastRunDate = state.Today()
 	st.LastBackupFile = finalPath
 	st.SHA256 = sum
@@ -175,22 +211,84 @@ func run() int {
 		return exitError
 	}
 
-	// Rotación solo después de confirmar la copia nueva.
+	// Rotación local solo después de confirmar la copia nueva.
 	deleted, err := rotation.Rotate(cfg.BackupDir, cfg.Retain)
 	if err != nil {
 		log.Errorf("el backup %s es válido pero la rotación falló (revisar a mano): %v", finalPath, err)
 		return exitError
 	}
 	for _, d := range deleted {
-		log.Infof("rotación: borrado %s", d)
+		log.Infof("rotación local: borrado %s", d)
+	}
+
+	// Sincronización a Cloudflare R2 (Fase 2)
+	r2Ctx, r2Cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer r2Cancel()
+
+	r2Client, err := getR2Client(r2Ctx, exeDir)
+	if err != nil {
+		log.Errorf("Cloudflare R2: credenciales no configuradas o inválidas (%v); el backup local es exitoso, queda pendiente de sync", err)
+		st.SetPendingR2(true)
+		if err := state.Save(statePath, st); err != nil {
+			log.Errorf("no se pudo guardar state.json con pending_sync: %v", err)
+		}
+	} else {
+		if err := syncToR2(r2Ctx, r2Client, cfg.Database, finalPath, log); err != nil {
+			log.Errorf("falló subida a R2 (%v); el backup local es exitoso, queda pendiente de sync", err)
+			st.SetPendingR2(true)
+			if err := state.Save(statePath, st); err != nil {
+				log.Errorf("no se pudo guardar state.json con pending_sync: %v", err)
+			}
+		} else {
+			st.MarkR2Synced(filepath.Base(finalPath))
+			if err := state.Save(statePath, st); err != nil {
+				log.Errorf("no se pudo guardar state.json con sync R2 exitosa: %v", err)
+			}
+		}
 	}
 
 	log.Infof("listo: %s sha256=%s", finalPath, sum)
 	return exitOK
 }
 
+func runConfigure(dir string) int {
+	datPath := filepath.Join(dir, "config.dat")
+	if err := secrets.Configure(datPath, os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "Error en configuración: %v\n", err)
+		return exitError
+	}
+	return exitOK
+}
+
+func getR2Client(ctx context.Context, dir string) (*r2.Client, error) {
+	datPath := filepath.Join(dir, "config.dat")
+	creds, err := secrets.Load(datPath)
+	if err != nil {
+		return nil, err
+	}
+	return r2.New(ctx, *creds)
+}
+
+func syncToR2(ctx context.Context, client *r2.Client, database, localFile string, log *logger.Logger) error {
+	remoteKey := r2.KeyForDatabase(database, localFile)
+	log.Infof("subiendo a R2: %s -> %s", localFile, remoteKey)
+	if err := client.Upload(ctx, localFile, remoteKey); err != nil {
+		return err
+	}
+	log.Infof("subida a R2 confirmada: %s", remoteKey)
+
+	prefix := fmt.Sprintf("%s/", database)
+	deleted, err := client.Rotate(ctx, prefix, remoteKey)
+	if err != nil {
+		log.Warnf("rotación remota R2 con advertencias (no crítico): %v", err)
+	}
+	for _, d := range deleted {
+		log.Infof("rotación remota R2: borrado %s", d)
+	}
+	return nil
+}
+
 // removeTmpOrphans borra *.tmp del directorio y devuelve cuántos borró.
-// No toca .bak finales, state.json ni nada más.
 func removeTmpOrphans(dir string, log *logger.Logger) (int, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -216,9 +314,7 @@ func removeTmpOrphans(dir string, log *logger.Logger) (int, error) {
 	return n, nil
 }
 
-// atomicRename mueve src a dst. En Windows os.Rename no pisa el destino,
-// por eso se borra primero si existe (el nombre lleva timestamp de minuto,
-// colisiona solo si se fuerza dos corridas el mismo minuto).
+// atomicRename mueve src a dst con reemplazo si existe.
 func atomicRename(src, dst string) error {
 	if _, err := os.Stat(dst); err == nil {
 		if err := os.Remove(dst); err != nil {
@@ -235,9 +331,7 @@ func removeBestEffort(path string) {
 	_ = os.Remove(path)
 }
 
-// exeDir es el directorio del binario (ahí viven config.json,
-// state.json, agent.lock y logs/). Si no se puede determinar,
-// cae al directorio actual.
+// exeDir es el directorio del binario.
 func exeDir() string {
 	if exe, err := os.Executable(); err == nil {
 		if dir := filepath.Dir(exe); dir != "" {

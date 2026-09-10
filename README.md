@@ -1,25 +1,47 @@
-# FEMUCARIBE Backup Agent — Fase 1
+# FEMUCARIBE Backup Agent — Fase 1 & 2
 
 Agente batch (vida corta, disparado por Windows Task Scheduler) para backup
-de la base SQL Server `CONTABILIDAD`. **Fase 1: backup local + rotación.**
-Sin R2, sin copia a servidor, sin reporte a Supabase (fases posteriores).
+de la base SQL Server `CONTABILIDAD`.
+- **Fase 1:** Backup local en `C:\Backups\`, verificación `RESTORE VERIFYONLY`, hash SHA-256, lock file y rotación local (3 copias).
+- **Fase 2:** Subida a **Cloudflare R2** (S3 compatible), secretos cifrados con **Windows DPAPI** (`config.dat`), rotación remota a 1 copia y tolerancia a fallos con `pending_sync`.
+
+Sin copia a servidor ni reporte a Supabase (fases posteriores).
 
 ## Requisitos
 
 - Go 1.25+ (probado con 1.27 en Windows; lo exige `go-mssqldb` v1.11)
-- Windows en producción (corre con la identidad que tiene acceso al SQL)
+- Windows en producción (corre con la identidad que tiene acceso a SQL y a DPAPI)
 - SQL Server accesible con Windows Integrated Auth
 
 ## Configuración
 
 El agente busca junto al binario:
 
-| Archivo       | Descripción                                                        |
-|---------------|--------------------------------------------------------------------|
-| `config.json` | Opcional. Si no existe, usa los defaults de producción.           |
-| `state.json`  | Lo crea el agente: `last_run_date`, `last_backup_file`, `sha256`. |
-| `agent.lock`  | Lock file con PID. Lo crea/libera el agente.                      |
-| `logs/`       | `agent-YYYY-MM-DD.log` rotativo por día.                          |
+| Archivo       | Descripción                                                                          |
+|---------------|--------------------------------------------------------------------------------------|
+| `config.json` | Opcional. Parámetros locales: `backup_dir`, `server`, `database`, `retain` (default 3). |
+| `config.dat`  | Cifrado con DPAPI vía `backup-agent configure`: Endpoint, Bucket, Access Key y Secret Key. |
+| `state.json`  | Estado persistente: `last_run_date`, `last_backup_file`, `sha256`, `pending_sync.r2`, `r2_last_synced_file`. |
+| `agent.lock`  | Lock file con PID para evitar ejecuciones concurrentes.                              |
+| `logs/`       | `agent-YYYY-MM-DD.log` rotativo por día (soporta `Get-Content -Wait`).                |
+
+### Configuración inicial de Cloudflare R2 (DPAPI)
+
+Para registrar las credenciales de R2 de manera segura (sin texto plano en disco ni variables de entorno):
+
+```powershell
+.\bin\backup-agent.exe configure
+```
+
+El asistente solicitará interactivamente:
+1. **Endpoint de R2**: ej: `https://<account_id>.r2.cloudflarestorage.com`
+2. **Nombre del Bucket**: ej: `femucaribe-backups`
+3. **R2 Access Key ID**
+4. **R2 Secret Access Key**
+
+Los valores se cifran usando `CryptProtectData` (DPAPI de Windows) con scope `CURRENT_USER` y se guardan en `config.dat`. En tiempo de ejecución solo se descifran en memoria RAM.
+
+### Configuración local (opcional)
 
 Copiar y ajustar desde el ejemplo:
 
@@ -42,13 +64,16 @@ Copy-Item config.example.json (Join-Path (Split-Path (Get-Command .\bin\backup-a
 
 > **Importante:** `backup_dir` debe ser una ruta **local al servidor SQL**.
 > `BACKUP DATABASE` escribe desde el servicio SQL Server, no desde este
-> proceso. Si el agente corre en el mismo host que el SQL, `C:\Backups\`
-> funciona. La cuenta de servicio SQL necesita permiso de escritura ahí.
+> proceso. La cuenta de servicio SQL necesita permiso de escritura ahí.
 
 ## Uso
 
 ```powershell
+# Compilar binario
 go build -o bin/backup-agent.exe ./cmd/backup-agent
+
+# Configurar credenciales R2
+.\bin\backup-agent.exe configure
 
 # Modo normal (Task Scheduler): si ya hay backup de hoy, no repite
 .\bin\backup-agent.exe
@@ -62,75 +87,87 @@ go build -o bin/backup-agent.exe ./cmd/backup-agent
 
 Exit codes: `0` ok o ya-hecho-hoy, `1` error, `2` otra instancia en curso.
 
-Flujo de cada corrida: lock → crear `backup_dir` → descartar `.tmp`
-huérfanos → idempotencia diaria → `BACKUP DATABASE` a `.bak.tmp` →
-`RESTORE VERIFYONLY` → SHA-256 → rename atómico a
-`CONTABILIDAD_YYYYMMDD_HHMM.bak` → guardar `state.json` → rotación (3).
+### Flujo de ejecución
+
+1. **Lock file**: Adquiere `agent.lock`. Si hay un proceso huérfano con PID muerto, lo reclama.
+2. **Limpieza de huérfanos**: Elimina `.bak.tmp` residuales de corridas previas interrumpidas.
+3. **Sincronización pendiente (`pending_sync.r2`)**: Si hubo un fallo de red previo y el backup local existe, intenta subirlo a R2 **antes** de generar el nuevo backup del día.
+4. **Idempotencia diaria**: Si ya se corrió hoy y no se indicó `--force`, finaliza con log informativo.
+5. **Chequeo de espacio en disco**: Consulta tamaño estimado de la BD en SQL Server y valida espacio disponible en `backup_dir`.
+6. **Backup y Verificación**:
+   - `BACKUP DATABASE` a archivo temporal `.bak.tmp`.
+   - `RESTORE VERIFYONLY` sobre el temporal.
+   - Cálculo de hash SHA-256.
+   - Rename atómico al nombre final: `CONTABILIDAD_YYYYMMDD_HHMM.bak`.
+   - Registro en `state.json` y rotación local (mantiene las 3 copias más recientes).
+7. **Subida y Rotación en Cloudflare R2**:
+   - Subida con timeout de 10 min a la key `CONTABILIDAD/<nombre>.bak`.
+   - Confirmación por verificación estricta de tamaño contra `HeadObject`.
+   - Rotación remota: elimina copias viejas bajo `CONTABILIDAD/`, conservando únicamente la recién confirmada.
+   - Si la subida falla por timeout o pérdida de conectividad, se marca `pending_sync.r2 = true` en `state.json` sin abortar el proceso (el backup local permanece íntegro y protegido).
 
 ## Task Scheduler (producción)
 
 - Acción: `C:\Agente\backup-agent.exe` (sin argumentos), iniciar en `C:\Agente\`.
 - Trigger diario (ej: 23:00) + trigger AtStartup con delay.
-- Ejecutar como cuenta de servicio con acceso al SQL y a `C:\Backups\`.
-- Ante un fallo, el detalle está en `logs\agent-YYYY-MM-DD.log`.
+- Ejecutar como la cuenta de servicio configurada con DPAPI y acceso a SQL.
 
 Ver logs en vivo estilo `tail -f`:
 
 ```powershell
-Get-Content C:\Agente\logs\agent-2026-09-09.log -Wait
+Get-Content C:\Agente\logs\agent-2026-09-10.log -Wait
 ```
 
 ## Tests
 
-Unitarios (sin SQL Server):
+### Unitarios (sin dependencias externas)
 
 ```powershell
 go vet ./...
 go test ./... -v
 ```
 
-Integración (requiere SQL Server real o contenedor, **nunca** `CONTABILIDAD`):
+Cubre:
+- DPAPI round-trip, carga y guardado seguro de `config.dat`.
+- Compatibilidad hacia atrás de `state.json` y flags `pending_sync`.
+- Mocks de cliente S3/R2 (subida, verificación de discrepancia de tamaño, rotación remota a 1 copia).
+- Rotación local, detección de lock huérfano y hash SHA-256 por streaming.
 
-```powershell
-$env:FEMU_TEST_SQLSERVER = "localhost\SQLEXPRESS"
-go test -tags integration ./internal/sqlbackup/ -v
-```
+### Integración con MinIO local (simulando R2 en Docker)
 
-Crea y borra la base `femucaribe_baktest` (BACKUP + VERIFY reales).
+Para ejecutar pruebas contra un endpoint S3 local:
 
-Recuperación ante kill (manual): matar el proceso a mitad del `BACKUP`,
-verificar que queda un `.bak.tmp` huérfano y que la siguiente corrida lo
-descarta y completa un backup válido sin duplicar ni corromper.
-La lógica de descarte está cubierta además por `TestRemoveTmpOrphans_KillRecovery`.
+1. Levantar MinIO en Docker:
+   ```powershell
+   docker run -d -p 9000:9000 -p 9001:9001 --name minio `
+     -e "MINIO_ROOT_USER=minioadmin" `
+     -e "MINIO_ROOT_PASSWORD=minioadmin" `
+     quay.io/minio/minio server /data --console-address ":9001"
+   ```
+2. Crear un bucket `femucaribe-backups` desde la consola web `http://localhost:9001`.
+3. Configurar el agente para apuntar al MinIO local:
+   - Endpoint: `http://localhost:9000`
+   - Bucket: `femucaribe-backups`
+   - Access Key: `minioadmin`
+   - Secret Key: `minioadmin`
 
 ## Estructura
 
 ```text
 femucaribe-backup-agent/
-├── cmd/backup-agent/main.go   # flujo batch + CLI (--force, --config)
+├── cmd/backup-agent/main.go       # flujo batch + subcomando configure + flags
 ├── internal/
-│   ├── config/     # config.json con defaults de producción
-│   ├── state/      # state.json: last_run_date, last_backup_file, sha256
-│   ├── lock/       # lock file con PID + detección de huérfano (tasklist/signal 0)
-│   ├── sqlbackup/  # BACKUP DATABASE / RESTORE VERIFYONLY (go-mssqldb, Win Auth)
-│   ├── hasher/     # SHA-256 por stream
-│   ├── rotation/   # conserva N .bak recientes, ignora .tmp
-│   └── logger/     # logs/agent-YYYY-MM-DD.log (apto para Get-Content -Wait)
+│   ├── config/         # config.json con defaults de producción
+│   ├── hasher/         # SHA-256 por stream
+│   ├── lock/           # lock file con PID + detección de huérfanos
+│   ├── logger/         # logs/agent-YYYY-MM-DD.log con Warnf/Errorf/Infof
+│   ├── rotation/       # rotación local: conserva N .bak recientes
+│   ├── secrets/        # cifrado DPAPI (Windows) y manejo de config.dat
+│   ├── sqlbackup/      # BACKUP DATABASE / RESTORE VERIFYONLY (go-mssqldb)
+│   ├── state/          # state.json: fechas, hashes y pending_sync
+│   └── storage/r2/     # cliente Cloudflare R2, verificación de tamaño y rotación remota
 ├── config.example.json
 ├── go.mod
+├── go.sum
 └── README.md
 ```
-
-## Decisiones (según prompt Fase 1)
-
-- Driver `github.com/microsoft/go-mssqldb` (errores tipados, timeouts vía
-  `context`); Windows Integrated Auth, sin credenciales en texto plano.
-- Rotación ordena por nombre (`CONTABILIDAD_YYYYMMDD_HHMM.bak` es
-  lexicográficamente cronológico); ignora `.tmp`, `state.json` y demás.
-- `state.json` ausente = "nunca se corrió"; corrupto = se loguea y se trata
-  como "nunca se corrió", nunca crashea. `Save` atómico (temporal + rename).
-- Lock corrupto o con PID muerto se reclama; con PID vivo → exit 2.
-- Chequeo de espacio libre **antes** del `BACKUP` (falla rápido).
-- SQL detenido/instancia inaccesible → falla rápido, sin tocar `state.json`
-  ni dejar archivos a medio escribir (el `.tmp` se borra; si es kill -9,
-  lo descarta la siguiente corrida).

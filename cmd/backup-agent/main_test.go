@@ -94,3 +94,11 @@ func TestExeDir_NonEmpty(t *testing.T) {
 		t.Error("exeDir no debería ser vacío")
 	}
 }
+
+func TestGetR2Client_MissingConfig(t *testing.T) {
+	dir := t.TempDir()
+	_, err := getR2Client(t.Context(), dir)
+	if err == nil {
+		t.Error("getR2Client sin config.dat debería fallar")
+	}
+}

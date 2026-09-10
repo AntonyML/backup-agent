@@ -51,11 +51,17 @@ func timestamp() string { return time.Now().Format("2006-01-02 15:04:05") }
 // Info registra una línea informativa.
 func (l *Logger) Info(msg string) { l.write("INFO", msg) }
 
+// Warn registra una línea de advertencia.
+func (l *Logger) Warn(msg string) { l.write("WARN", msg) }
+
 // Error registra una línea de error.
 func (l *Logger) Error(msg string) { l.write("ERROR", msg) }
 
 // Infof registra con formato.
 func (l *Logger) Infof(format string, args ...any) { l.write("INFO", fmt.Sprintf(format, args...)) }
+
+// Warnf registra advertencia con formato.
+func (l *Logger) Warnf(format string, args ...any) { l.write("WARN", fmt.Sprintf(format, args...)) }
 
 // Errorf registra error con formato.
 func (l *Logger) Errorf(format string, args ...any) { l.write("ERROR", fmt.Sprintf(format, args...)) }
