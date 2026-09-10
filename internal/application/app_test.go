@@ -7,14 +7,29 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"femucaribe-backup-agent/internal/config"
+	"femucaribe-backup-agent/internal/events"
 	"femucaribe-backup-agent/internal/lock"
 	"femucaribe-backup-agent/internal/state"
 	"femucaribe-backup-agent/internal/storage"
 )
+
+type mockEventRepo struct {
+	events []events.Event
+	err    error
+}
+
+func (m *mockEventRepo) Append(ctx context.Context, event events.Event) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.events = append(m.events, event)
+	return nil
+}
 
 type mockCloser struct{}
 
@@ -348,14 +363,17 @@ func TestGetTUIStatus(t *testing.T) {
 	if bStatus.Result != "never_run" {
 		t.Errorf("esperaba never_run, dio: %s", bStatus.Result)
 	}
-	if len(backends) != 3 {
-		t.Fatalf("esperaba 3 backends (Local, R2, Server), dio %d", len(backends))
+	if len(backends) != 4 {
+		t.Fatalf("esperaba 4 backends (Local, R2, Server, Supabase), dio %d", len(backends))
 	}
-	if backends[0].Name != "Local" || backends[1].Name != "R2" || backends[2].Name != "Server" {
+	if backends[0].Name != "Local" || backends[1].Name != "R2" || backends[2].Name != "Server" || backends[3].Name != "Supabase" {
 		t.Errorf("nombres de backends inesperados: %+v", backends)
 	}
 	if backends[2].Configured {
 		t.Errorf("Server debería figurar como no configurado")
+	}
+	if backends[3].Configured {
+		t.Errorf("Supabase debería figurar como no configurado")
 	}
 
 	// Caso 2: Con estado exitoso
@@ -599,6 +617,207 @@ func TestGetTUIStatus_ServerConfiguredAndPending(t *testing.T) {
 		t.Errorf("LastSyncOK en ServerStatus debería ser true")
 	}
 }
+
+func TestBackup_EmitsOperationalEvents(t *testing.T) {
+	sqlEngine := &mockSQLEngine{}
+	r2Backend := &mockBackend{name: "r2"}
+	serverBackend := &mockBackend{name: "server"}
+	backends := []storage.Backend{r2Backend, serverBackend}
+
+	app, statePath, _ := setupTestApp(t, sqlEngine, backends)
+	eventRepo := &mockEventRepo{}
+	app.eventRepo = eventRepo
+	app.cfg.Supabase.Enabled = true
+	app.cfg.Supabase.URL = "http://localhost:54321"
+
+	ctx := context.Background()
+	if err := app.Backup(ctx, BackupOptions{Force: true}); err != nil {
+		t.Fatalf("Backup falló: %v", err)
+	}
+
+	typesReceived := make(map[string]bool)
+	for _, e := range eventRepo.events {
+		typesReceived[e.EventType] = true
+	}
+
+	expectedTypes := []string{
+		events.TypeAgentStarted,
+		events.TypeBackupStarted,
+		events.TypeLocalBackupCompleted,
+		events.TypeLocalRotationCompleted,
+		events.TypeR2SyncCompleted,
+		events.TypeServerSyncCompleted,
+		events.TypeServerRotationCompleted,
+		events.TypeBackupCompleted,
+		events.TypeAgentFinished,
+	}
+
+	for _, exp := range expectedTypes {
+		if !typesReceived[exp] {
+			t.Errorf("evento esperado no emitido: %s", exp)
+		}
+	}
+
+	st, err := state.Load(statePath)
+	if err != nil {
+		t.Fatalf("cargar state: %v", err)
+	}
+	if len(st.PendingEvents) != 0 {
+		t.Errorf("no debería haber eventos pendientes tras envío exitoso, dio: %d", len(st.PendingEvents))
+	}
+}
+
+func TestBackup_EmitsBackupFailedEvent(t *testing.T) {
+	sqlEngine := &mockSQLEngine{backupErr: errors.New("falla simulada en BACKUP DATABASE")}
+	app, _, _ := setupTestApp(t, sqlEngine, nil)
+	eventRepo := &mockEventRepo{}
+	app.eventRepo = eventRepo
+	app.cfg.Supabase.Enabled = true
+	app.cfg.Supabase.URL = "http://localhost:54321"
+
+	ctx := context.Background()
+	err := app.Backup(ctx, BackupOptions{Force: true})
+	if err == nil {
+		t.Fatal("se esperaba error de backup")
+	}
+
+	var foundBackupFailed, foundAgentFinished bool
+	for _, e := range eventRepo.events {
+		if e.EventType == events.TypeBackupFailed {
+			foundBackupFailed = true
+			if e.Status != events.StatusFailed {
+				t.Errorf("status de backup_failed debe ser FAILED, dio %s", e.Status)
+			}
+			if !strings.Contains(e.ErrorMessage, "falla simulada") {
+				t.Errorf("mensaje de error no contiene texto esperado: %s", e.ErrorMessage)
+			}
+		}
+		if e.EventType == events.TypeAgentFinished {
+			foundAgentFinished = true
+			if e.Status != events.StatusFailed {
+				t.Errorf("status de agent_finished debe ser FAILED, dio %s", e.Status)
+			}
+		}
+	}
+
+	if !foundBackupFailed {
+		t.Error("evento backup_failed no fue emitido")
+	}
+	if !foundAgentFinished {
+		t.Error("evento agent_finished no fue emitido")
+	}
+}
+
+func TestBackup_SupabaseFailureDoesNotFailBackup(t *testing.T) {
+	sqlEngine := &mockSQLEngine{}
+	app, statePath, _ := setupTestApp(t, sqlEngine, nil)
+	// Event repo devuelve error de red recuperable
+	eventRepo := &mockEventRepo{err: errors.New("connection refused: 503")}
+	app.eventRepo = eventRepo
+	app.cfg.Supabase.Enabled = true
+	app.cfg.Supabase.URL = "http://localhost:54321"
+
+	ctx := context.Background()
+	// El backup debe ser 100% exitoso aunque Supabase esté caído
+	if err := app.Backup(ctx, BackupOptions{Force: true}); err != nil {
+		t.Fatalf("el backup no debe fallar si Supabase está caído: %v", err)
+	}
+
+	st, err := state.Load(statePath)
+	if err != nil {
+		t.Fatalf("cargar state: %v", err)
+	}
+
+	// Debe haber acumulado eventos en pending_events
+	if len(st.PendingEvents) == 0 {
+		t.Error("se esperaba que los eventos fallidos se guardaran en state.PendingEvents")
+	}
+}
+
+func TestSync_FlushesPendingEvents(t *testing.T) {
+	app, statePath, _ := setupTestApp(t, &mockSQLEngine{}, nil)
+	eventRepo := &mockEventRepo{}
+	app.eventRepo = eventRepo
+	app.cfg.Supabase.Enabled = true
+
+	// Guardar estado con eventos pendientes
+	initialState := &state.State{
+		LastRunDate: "2026-09-10",
+		PendingEvents: []events.Event{
+			{EventID: "evt_p1", EventType: events.TypeBackupCompleted},
+			{EventID: "evt_p2", EventType: events.TypeAgentFinished},
+		},
+	}
+	if err := state.Save(statePath, initialState); err != nil {
+		t.Fatalf("guardar state inicial: %v", err)
+	}
+
+	ctx := context.Background()
+	// Sync debe vaciar los eventos pendientes enviándolos a Supabase
+	if err := app.Sync(ctx, SyncOptions{Force: false}); err != nil {
+		t.Fatalf("Sync falló al sincronizar eventos pendientes: %v", err)
+	}
+
+	if len(eventRepo.events) != 2 {
+		t.Errorf("se esperaban 2 eventos enviados a Supabase, dio: %d", len(eventRepo.events))
+	}
+
+	st, err := state.Load(statePath)
+	if err != nil {
+		t.Fatalf("cargar state: %v", err)
+	}
+	if len(st.PendingEvents) != 0 {
+		t.Errorf("PendingEvents debería quedar vacío tras Sync, tiene %d", len(st.PendingEvents))
+	}
+}
+
+func TestGetTUIStatus_Supabase(t *testing.T) {
+	app, statePath, _ := setupTestApp(t, &mockSQLEngine{}, nil)
+
+	// Caso: Supabase disabled
+	app.cfg.Supabase.Enabled = false
+	_, backends, _ := app.GetTUIStatus(context.Background())
+	var spStatus BackendStatus
+	for _, b := range backends {
+		if b.Name == "Supabase" {
+			spStatus = b
+			break
+		}
+	}
+	if spStatus.StatusText != "Disabled" {
+		t.Errorf("esperaba status Disabled, dio: %s", spStatus.StatusText)
+	}
+
+	// Caso: Supabase enabled y conectado
+	app.cfg.Supabase.Enabled = true
+	app.eventRepo = &mockEventRepo{}
+	_, backends, _ = app.GetTUIStatus(context.Background())
+	for _, b := range backends {
+		if b.Name == "Supabase" {
+			spStatus = b
+			break
+		}
+	}
+	if spStatus.StatusText != "Connected" {
+		t.Errorf("esperaba status Connected, dio: %s", spStatus.StatusText)
+	}
+
+	// Caso: Supabase con eventos pendientes
+	_ = state.Save(statePath, &state.State{
+		PendingEvents: []events.Event{{EventID: "evt_1"}},
+	})
+	_, backends, _ = app.GetTUIStatus(context.Background())
+	for _, b := range backends {
+		if b.Name == "Supabase" {
+			spStatus = b
+			break
+		}
+	}
+	if spStatus.StatusText != "PENDING" {
+		t.Errorf("esperaba status PENDING, dio: %s", spStatus.StatusText)
+	}
+}
+
 
 
 

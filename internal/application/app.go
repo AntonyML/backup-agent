@@ -7,9 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"femucaribe-backup-agent/internal/config"
+	"femucaribe-backup-agent/internal/events"
 	"femucaribe-backup-agent/internal/sqlbackup"
+	"femucaribe-backup-agent/internal/state"
 	"femucaribe-backup-agent/internal/storage"
 )
 
@@ -73,6 +76,7 @@ type App struct {
 	logDir       string
 	backends     []storage.Backend
 	localBackend storage.Backend
+	eventRepo    events.EventRepository
 	sqlEngine    SQLEngine
 	failpoint    FailpointHook
 	logger       *slog.Logger
@@ -86,6 +90,7 @@ type Options struct {
 	LogDir       string
 	Backends     []storage.Backend
 	LocalBackend storage.Backend
+	EventRepo    events.EventRepository
 	SQLEngine    SQLEngine
 	Failpoint    FailpointHook
 	Logger       *slog.Logger
@@ -118,10 +123,67 @@ func New(opts Options) *App {
 		logDir:       opts.LogDir,
 		backends:     opts.Backends,
 		localBackend: opts.LocalBackend,
+		eventRepo:    opts.EventRepo,
 		sqlEngine:    engine,
 		failpoint:    fp,
 		logger:       log,
 	}
+}
+
+// recordEvent registra un evento operativo en Supabase de forma segura y no bloqueante.
+// Si Supabase falla con un error recuperable, el evento se guarda como pendiente en state.json.
+func (a *App) recordEvent(ctx context.Context, evt events.Event) {
+	if a.eventRepo == nil {
+		return
+	}
+
+	timeout := 10 * time.Second
+	if a.cfg.Supabase.TimeoutSec > 0 {
+		timeout = time.Duration(a.cfg.Supabase.TimeoutSec) * time.Second
+	}
+	eventCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	if err := a.eventRepo.Append(eventCtx, evt); err != nil {
+		a.logger.Warn("no se pudo registrar evento en Supabase", "tipo", evt.EventType, "error", err)
+		if events.IsRetryable(err) {
+			st, loadErr := state.Load(a.statePath)
+			if loadErr == nil && st != nil {
+				st.AddPendingEvent(evt)
+				_ = state.Save(a.statePath, st)
+			}
+		}
+	}
+}
+
+// flushPendingEvents intenta reenviar eventos acumulados en state.json hacia Supabase.
+func (a *App) flushPendingEvents(ctx context.Context, st *state.State) {
+	if a.eventRepo == nil || st == nil || len(st.PendingEvents) == 0 {
+		return
+	}
+
+	a.logger.Info("sincronizando eventos pendientes hacia Supabase", "cantidad", len(st.PendingEvents))
+	var remaining []events.Event
+
+	for _, evt := range st.PendingEvents {
+		timeout := 5 * time.Second
+		if a.cfg.Supabase.TimeoutSec > 0 {
+			timeout = time.Duration(a.cfg.Supabase.TimeoutSec) * time.Second
+		}
+		eventCtx, cancel := context.WithTimeout(ctx, timeout)
+		err := a.eventRepo.Append(eventCtx, evt)
+		cancel()
+
+		if err != nil {
+			a.logger.Warn("reintento de evento pendiente falló", "tipo", evt.EventType, "id", evt.EventID, "error", err)
+			remaining = append(remaining, evt)
+		} else {
+			a.logger.Info("evento pendiente sincronizado exitosamente", "tipo", evt.EventType, "id", evt.EventID)
+		}
+	}
+
+	st.PendingEvents = remaining
+	_ = state.Save(a.statePath, st)
 }
 
 

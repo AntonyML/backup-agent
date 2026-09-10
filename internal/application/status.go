@@ -21,6 +21,8 @@ type StatusReport struct {
 	Server               string `json:"server"`
 	BackupDir            string `json:"backup_dir"`
 	Retain               int    `json:"retain"`
+	SupabaseEnabled      bool   `json:"supabase_enabled"`
+	PendingEventsCount   int    `json:"pending_events_count"`
 }
 
 // Status consulta el estado operativo y persistente del agente.
@@ -48,5 +50,7 @@ func (a *App) Status(ctx context.Context) (*StatusReport, error) {
 		Server:               a.cfg.Server,
 		BackupDir:            a.cfg.BackupDir,
 		Retain:               a.cfg.Retain,
+		SupabaseEnabled:      a.cfg.Supabase.Enabled,
+		PendingEventsCount:   len(st.PendingEvents),
 	}, nil
 }

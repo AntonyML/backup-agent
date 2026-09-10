@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"femucaribe-backup-agent/internal/events"
 	"femucaribe-backup-agent/internal/lock"
 	"femucaribe-backup-agent/internal/state"
+	"femucaribe-backup-agent/internal/version"
 )
 
 type SyncOptions struct {
@@ -33,14 +35,24 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 		return fmt.Errorf("cargar estado: %w", err)
 	}
 
+	// Reintentar eventos pendientes hacia Supabase si los hay
+	hadPendingEvents := len(st.PendingEvents) > 0
+	if hadPendingEvents {
+		a.flushPendingEvents(ctx, st)
+	}
+
 	hasPending := st.PendingSync.R2 || st.PendingSync.Server
 	if (!hasPending && !opts.Force) || st.LastBackupFile == "" {
-		a.logger.Info("no hay sincronizaciones pendientes")
-		return ErrNoPendingBackup
+		if !hadPendingEvents {
+			a.logger.Info("no hay sincronizaciones pendientes")
+			return ErrNoPendingBackup
+		}
+		a.logger.Info("eventos pendientes sincronizados, sin backups pendientes")
+		return nil
 	}
 
 	if _, err := os.Stat(st.LastBackupFile); err != nil {
-		a.logger.Warn("el archivo pendiente no existe en disco", "archivo", st.LastBackupFile)
+		a.logger.Warn("el archivo pendiente no existe en disco, descartando pendientes", "archivo", st.LastBackupFile)
 		st.SetPendingR2(false)
 		st.SetPendingServer(false)
 		_ = state.Save(a.statePath, st)
@@ -65,22 +77,45 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 		if err != nil {
 			hadError = true
 			a.logger.Error("falló sincronización a backend", "backend", b.Name(), "error", err)
-			if isR2 {
-				st.SetPendingR2(true)
-			} else if isServer {
+			failType := events.TypeR2SyncFailed
+			if isServer {
+				failType = events.TypeServerSyncFailed
 				st.SetPendingServer(true)
+			} else if isR2 {
+				st.SetPendingR2(true)
 			}
+			a.recordEvent(ctx, events.Event{
+				EventID:      events.GenerateID(),
+				Timestamp:    time.Now().UTC(),
+				EventType:    failType,
+				Status:       events.StatusFailed,
+				Backend:      b.Name(),
+				FileName:     filepath.Base(st.LastBackupFile),
+				ErrorMessage: sanitizeError(err),
+				AgentVersion: version.Current,
+			})
 		} else {
 			a.logger.Info("sincronización exitosa", "backend", b.Name())
-			if isR2 {
-				st.MarkR2Synced(filepath.Base(st.LastBackupFile))
-				_ = b.Rotate(ctx, 1)
-			} else if isServer {
+			completedType := events.TypeR2SyncCompleted
+			if isServer {
+				completedType = events.TypeServerSyncCompleted
 				st.MarkServerSynced(filepath.Base(st.LastBackupFile))
 				_ = b.Rotate(ctx, 10)
+			} else if isR2 {
+				st.MarkR2Synced(filepath.Base(st.LastBackupFile))
+				_ = b.Rotate(ctx, 1)
 			} else {
 				_ = b.Rotate(ctx, 0)
 			}
+			a.recordEvent(ctx, events.Event{
+				EventID:      events.GenerateID(),
+				Timestamp:    time.Now().UTC(),
+				EventType:    completedType,
+				Status:       events.StatusSuccess,
+				Backend:      b.Name(),
+				FileName:     filepath.Base(st.LastBackupFile),
+				AgentVersion: version.Current,
+			})
 		}
 		_ = state.Save(a.statePath, st)
 	}

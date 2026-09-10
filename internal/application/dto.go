@@ -135,6 +135,26 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 		StatusText:  serverStatusText,
 	})
 
+	// 4. Supabase
+	supabaseConfigured := a.cfg.Supabase.Enabled
+	supabaseStatusText := "Disabled"
+	if supabaseConfigured {
+		if len(st.PendingEvents) > 0 {
+			supabaseStatusText = "PENDING"
+		} else if a.eventRepo != nil {
+			supabaseStatusText = "Connected"
+		} else {
+			supabaseStatusText = "Not configured"
+		}
+	}
+	backendStatuses = append(backendStatuses, BackendStatus{
+		Name:        "Supabase",
+		Configured:  supabaseConfigured,
+		LastSyncOK:  supabaseConfigured && len(st.PendingEvents) == 0,
+		PendingSync: len(st.PendingEvents) > 0,
+		StatusText:  supabaseStatusText,
+	})
+
 	return backupStatus, backendStatuses, nil
 }
 

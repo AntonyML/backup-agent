@@ -3,7 +3,10 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"femucaribe-backup-agent/internal/events"
 )
 
 func TestLoad_MissingFile_ReturnsEmptyWithoutError(t *testing.T) {
@@ -33,7 +36,7 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if *got != *want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("round-trip: quiero %+v, obtuve %+v", want, got)
 	}
 }
@@ -147,7 +150,7 @@ func TestSaveLoad_Fase2Fields(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if *got != *want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("roundtrip Fase 2: quiero %+v, obtuve %+v", want, got)
 	}
 
@@ -188,7 +191,7 @@ func TestSaveLoad_Fase3ServerFields(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if *got != *want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("roundtrip Fase 3: quiero %+v, obtuve %+v", want, got)
 	}
 
@@ -204,6 +207,25 @@ func TestSaveLoad_Fase3ServerFields(t *testing.T) {
 	got.SetPendingServer(true)
 	if !got.PendingSync.Server {
 		t.Errorf("tras SetPendingServer(true), PendingSync.Server debe ser true")
+	}
+}
+
+func TestState_PendingEvents(t *testing.T) {
+	st := &State{}
+	evt1 := events.Event{EventID: "evt_1", EventType: "test"}
+	evt2 := events.Event{EventID: "evt_2", EventType: "test"}
+
+	st.AddPendingEvent(evt1)
+	st.AddPendingEvent(evt2)
+	st.AddPendingEvent(evt1) // Duplicado no debe agregarse
+
+	if len(st.PendingEvents) != 2 {
+		t.Fatalf("esperaba 2 eventos pendientes, tengo %d", len(st.PendingEvents))
+	}
+
+	st.ClearPendingEvents()
+	if len(st.PendingEvents) != 0 {
+		t.Errorf("ClearPendingEvents debería vaciar el slice, tengo %d", len(st.PendingEvents))
 	}
 }
 

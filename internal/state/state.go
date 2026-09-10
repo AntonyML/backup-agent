@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"femucaribe-backup-agent/internal/events"
 )
 
 // PendingSync agrupa las sincronizaciones remotas pendientes.
@@ -17,12 +19,13 @@ type PendingSync struct {
 // State es el estado persistente del agente (state.json junto al binario).
 // last_run_date usa formato YYYY-MM-DD para la idempotencia diaria.
 type State struct {
-	LastRunDate          string      `json:"last_run_date"`
-	LastBackupFile       string      `json:"last_backup_file"`
-	SHA256               string      `json:"sha256"`
-	PendingSync          PendingSync `json:"pending_sync"`
-	R2LastSyncedFile     string      `json:"r2_last_synced_file,omitempty"`
-	ServerLastSyncedFile string      `json:"server_last_synced_file,omitempty"`
+	LastRunDate          string         `json:"last_run_date"`
+	LastBackupFile       string         `json:"last_backup_file"`
+	SHA256               string         `json:"sha256"`
+	PendingSync          PendingSync    `json:"pending_sync"`
+	R2LastSyncedFile     string         `json:"r2_last_synced_file,omitempty"`
+	ServerLastSyncedFile string         `json:"server_last_synced_file,omitempty"`
+	PendingEvents        []events.Event `json:"pending_events,omitempty"`
 }
 
 // SetPendingR2 actualiza el flag de sincronización pendiente a R2.
@@ -52,6 +55,29 @@ func (s *State) MarkServerSynced(filename string) {
 	if s != nil {
 		s.PendingSync.Server = false
 		s.ServerLastSyncedFile = filename
+	}
+}
+
+// AddPendingEvent registra un evento pendiente evitando duplicados por EventID y limitando el buffer.
+func (s *State) AddPendingEvent(evt events.Event) {
+	if s == nil {
+		return
+	}
+	for _, e := range s.PendingEvents {
+		if e.EventID == evt.EventID {
+			return
+		}
+	}
+	if len(s.PendingEvents) >= 100 {
+		s.PendingEvents = s.PendingEvents[1:]
+	}
+	s.PendingEvents = append(s.PendingEvents, evt)
+}
+
+// ClearPendingEvents vacía la cola de eventos pendientes.
+func (s *State) ClearPendingEvents() {
+	if s != nil {
+		s.PendingEvents = nil
 	}
 }
 

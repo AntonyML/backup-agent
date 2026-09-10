@@ -9,6 +9,7 @@ import (
 
 	"femucaribe-backup-agent/internal/application"
 	"femucaribe-backup-agent/internal/config"
+	"femucaribe-backup-agent/internal/events"
 	"femucaribe-backup-agent/internal/logging"
 	"femucaribe-backup-agent/internal/secrets"
 	"femucaribe-backup-agent/internal/storage"
@@ -127,6 +128,22 @@ func BuildDefaultApp(exeDir string, cfgPath string) (*application.App, error) {
 		backends = append(backends, serverBackend)
 	}
 
+	var eventRepo events.EventRepository
+	if cfg.Supabase.Enabled {
+		apiKey := os.Getenv("SUPABASE_KEY")
+		if apiKey == "" {
+			apiKey = os.Getenv("SUPABASE_API_KEY")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("SUPABASE_ACCESS_TOKEN")
+		}
+		if apiKey == "" {
+			logger.Warn("supabase habilitado pero no se encontró API key en variables de entorno (SUPABASE_KEY / SUPABASE_API_KEY)")
+		} else {
+			eventRepo = events.NewSupabaseRepository(cfg.Supabase, apiKey, nil)
+		}
+	}
+
 	return application.New(application.Options{
 		Config:       cfg,
 		StatePath:    statePath,
@@ -135,9 +152,9 @@ func BuildDefaultApp(exeDir string, cfgPath string) (*application.App, error) {
 		LogDir:       filepath.Join(exeDir, "logs"),
 		Backends:     backends,
 		LocalBackend: localBackend,
+		EventRepo:    eventRepo,
 		Logger:       logger,
 	}), nil
-
 }
 
 // ExitCodeForError traduce errores a códigos de salida centralizados.
