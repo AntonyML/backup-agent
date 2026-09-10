@@ -6,3 +6,5 @@ logs/
 state.json
 *.lock
 agent.lock
+.env
+.env.test

@@ -96,7 +96,12 @@ func TakeSnapshot(ctx context.Context, db *sql.DB) (*DatabaseSnapshot, error) {
 // AssertDatabaseEquivalent compara rigurosamente los snapshots de dos bases de datos y falla el test si hay diferencias.
 func AssertDatabaseEquivalent(t *testing.T, origDB, restoredDB *sql.DB) {
 	t.Helper()
-	ctx := context.Background()
+	AssertDatabaseEquivalentWithContext(context.Background(), t, origDB, restoredDB)
+}
+
+// AssertDatabaseEquivalentWithContext compara los snapshots de dos bases de datos bajo el contexto provisto.
+func AssertDatabaseEquivalentWithContext(ctx context.Context, t *testing.T, origDB, restoredDB *sql.DB) {
+	t.Helper()
 
 	origSnap, err := TakeSnapshot(ctx, origDB)
 	if err != nil {
@@ -122,3 +127,4 @@ func AssertDatabaseEquivalent(t *testing.T, origDB, restoredDB *sql.DB) {
 		}
 	}
 }
+
