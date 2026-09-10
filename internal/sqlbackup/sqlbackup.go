@@ -3,6 +3,7 @@ package sqlbackup
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -10,6 +11,10 @@ import (
 
 	_ "github.com/microsoft/go-mssqldb"
 )
+
+// ErrInsufficientSpace se retorna cuando el espacio libre es inferior al estimado.
+var ErrInsufficientSpace = errors.New("sqlbackup: espacio insuficiente en disco")
+
 
 // DriverName es el nombre del driver registrado en database/sql.
 const DriverName = "sqlserver"
@@ -152,9 +157,10 @@ func EnsureFreeSpace(dir string, needed int64) error {
 		return fmt.Errorf("sqlbackup: no se pudo medir espacio libre en %s: %w", dir, err)
 	}
 	if free < needed {
-		return fmt.Errorf("sqlbackup: espacio insuficiente en %s: libres %.2f GB, se necesitan ~%.2f GB para respaldar",
-			dir, gb(free), gb(needed))
+		return fmt.Errorf("%w en %s: libres %.2f GB, se necesitan ~%.2f GB para respaldar",
+			ErrInsufficientSpace, dir, gb(free), gb(needed))
 	}
+
 	return nil
 }
 

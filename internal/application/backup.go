@@ -108,10 +108,24 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) error {
 		return fmt.Errorf("backup database: %w", err)
 	}
 
+	if a.failpoint != nil {
+		if err := a.failpoint("after_backup_started"); err != nil {
+			// Simula corte abrupto/kill dejando .tmp huérfano en disco
+			return fmt.Errorf("failpoint after_backup_started: %w", err)
+		}
+	}
+
 	a.logger.Info("ejecutando RESTORE VERIFYONLY", "archivo", tmpPath)
 	if err := a.sqlEngine.VerifyBackup(bakCtx, db, tmpPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("verify backup: %w", err)
+	}
+
+	if a.failpoint != nil {
+		if err := a.failpoint("after_verify"); err != nil {
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("failpoint after_verify: %w", err)
+		}
 	}
 
 	sum, err := hasher.File(tmpPath)
@@ -125,6 +139,12 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) error {
 		return fmt.Errorf("rename a destino final: %w", err)
 	}
 
+	if a.failpoint != nil {
+		if err := a.failpoint("before_state_save"); err != nil {
+			return fmt.Errorf("failpoint before_state_save: %w", err)
+		}
+	}
+
 	st.LastRunDate = state.Today()
 	st.LastBackupFile = finalPath
 	st.SHA256 = sum
@@ -132,6 +152,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) error {
 		a.logger.Error("no se pudo guardar state.json local", "error", err)
 		return fmt.Errorf("guardar state.json: %w", err)
 	}
+
 
 	// Rotación local
 	if a.localBackend != nil {

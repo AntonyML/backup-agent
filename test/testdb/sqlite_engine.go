@@ -14,11 +14,26 @@ import (
 
 // SQLiteSQLEngine adapta una base de datos SQLite para cumplir con la interfaz application.SQLEngine en tests rápidos.
 type SQLiteSQLEngine struct {
-	dbPath string
+	dbPath            string
+	simulateDiskFull  bool
+	simulateBackupErr error
+	simulateVerifyErr error
 }
 
 func NewSQLiteSQLEngine(dbPath string) *SQLiteSQLEngine {
 	return &SQLiteSQLEngine{dbPath: dbPath}
+}
+
+func (e *SQLiteSQLEngine) SetSimulateDiskFull(v bool) {
+	e.simulateDiskFull = v
+}
+
+func (e *SQLiteSQLEngine) SetSimulateBackupError(err error) {
+	e.simulateBackupErr = err
+}
+
+func (e *SQLiteSQLEngine) SetSimulateVerifyError(err error) {
+	e.simulateVerifyErr = err
 }
 
 func (e *SQLiteSQLEngine) Open(server string, loginTimeoutSec int) (io.Closer, error) {
@@ -38,10 +53,16 @@ func (e *SQLiteSQLEngine) DatabaseSizeBytes(ctx context.Context, db io.Closer, d
 }
 
 func (e *SQLiteSQLEngine) EnsureFreeSpace(dir string, neededBytes int64) error {
+	if e.simulateDiskFull {
+		return sqlbackup.ErrInsufficientSpace
+	}
 	return sqlbackup.EnsureFreeSpace(dir, neededBytes)
 }
 
 func (e *SQLiteSQLEngine) BackupDatabase(ctx context.Context, db io.Closer, database, targetPath string) error {
+	if e.simulateBackupErr != nil {
+		return e.simulateBackupErr
+	}
 	srcData, err := os.ReadFile(e.dbPath)
 	if err != nil {
 		return fmt.Errorf("leer base origen: %w", err)
@@ -50,6 +71,9 @@ func (e *SQLiteSQLEngine) BackupDatabase(ctx context.Context, db io.Closer, data
 }
 
 func (e *SQLiteSQLEngine) VerifyBackup(ctx context.Context, db io.Closer, targetPath string) error {
+	if e.simulateVerifyErr != nil {
+		return e.simulateVerifyErr
+	}
 	testDB, err := sql.Open("sqlite", targetPath)
 	if err != nil {
 		return fmt.Errorf("abrir backup para verify: %w", err)
@@ -66,3 +90,4 @@ func (e *SQLiteSQLEngine) VerifyBackup(ctx context.Context, db io.Closer, target
 
 	return fixtures.AssertSeedIntegrity(ctx, testDB)
 }
+

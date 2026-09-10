@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 
 	"femucaribe-backup-agent/internal/config"
 	"femucaribe-backup-agent/internal/sqlbackup"
@@ -60,6 +61,9 @@ func DefaultSQLEngine() SQLEngine {
 	return defaultSQLEngine{}
 }
 
+// FailpointHook permite inyectar fallos controlados para pruebas de resiliencia y recuperación (solo en tests).
+type FailpointHook func(point string) error
+
 // App orquesta los casos de uso del agente sin depender de Cobra ni de flujos de terminal/TTY.
 type App struct {
 	cfg          config.Config
@@ -70,6 +74,7 @@ type App struct {
 	backends     []storage.Backend
 	localBackend storage.Backend
 	sqlEngine    SQLEngine
+	failpoint    FailpointHook
 	logger       *slog.Logger
 }
 
@@ -82,6 +87,7 @@ type Options struct {
 	Backends     []storage.Backend
 	LocalBackend storage.Backend
 	SQLEngine    SQLEngine
+	Failpoint    FailpointHook
 	Logger       *slog.Logger
 }
 
@@ -94,6 +100,16 @@ func New(opts Options) *App {
 	if engine == nil {
 		engine = DefaultSQLEngine()
 	}
+	fp := opts.Failpoint
+	if fp == nil && os.Getenv("TEST_FAILPOINT") != "" {
+		target := os.Getenv("TEST_FAILPOINT")
+		fp = func(point string) error {
+			if point == target {
+				return fmt.Errorf("failpoint simulado por TEST_FAILPOINT: %s", point)
+			}
+			return nil
+		}
+	}
 	return &App{
 		cfg:          opts.Config,
 		statePath:    opts.StatePath,
@@ -103,7 +119,9 @@ func New(opts Options) *App {
 		backends:     opts.Backends,
 		localBackend: opts.LocalBackend,
 		sqlEngine:    engine,
+		failpoint:    fp,
 		logger:       log,
 	}
 }
+
 
