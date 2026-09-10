@@ -97,3 +97,72 @@ func TestRanOn(t *testing.T) {
 		t.Error("RanOn con nil debería ser false, no panic")
 	}
 }
+
+func TestLoad_Fase1Compatibility(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	fase1JSON := `{
+  "last_run_date": "2026-01-15",
+  "last_backup_file": "C:\\Backups\\CONTABILIDAD_20260115_1200.bak",
+  "sha256": "hashfase1"
+}
+`
+	if err := os.WriteFile(path, []byte(fase1JSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load de state Fase 1 falló: %v", err)
+	}
+
+	if st.LastRunDate != "2026-01-15" || st.SHA256 != "hashfase1" {
+		t.Errorf("datos base incorrectos: %+v", st)
+	}
+	if st.PendingSync.R2 {
+		t.Errorf("PendingSync.R2 debería ser false por default")
+	}
+	if st.R2LastSyncedFile != "" {
+		t.Errorf("R2LastSyncedFile debería ser vacío por default")
+	}
+}
+
+func TestSaveLoad_Fase2Fields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	want := &State{
+		LastRunDate:    "2026-01-15",
+		LastBackupFile: `C:\Backups\CONTABILIDAD_20260115_1200.bak`,
+		SHA256:         "abc123",
+		PendingSync: PendingSync{
+			R2: true,
+		},
+		R2LastSyncedFile: "CONTABILIDAD_20260114_1200.bak",
+	}
+
+	if err := Save(path, want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if *got != *want {
+		t.Errorf("roundtrip Fase 2: quiero %+v, obtuve %+v", want, got)
+	}
+
+	// Probar helpers
+	got.MarkR2Synced("CONTABILIDAD_20260115_1200.bak")
+	if got.PendingSync.R2 {
+		t.Errorf("tras MarkR2Synced, PendingSync.R2 debe ser false")
+	}
+	if got.R2LastSyncedFile != "CONTABILIDAD_20260115_1200.bak" {
+		t.Errorf("R2LastSyncedFile no coincide")
+	}
+
+	got.SetPendingR2(true)
+	if !got.PendingSync.R2 {
+		t.Errorf("tras SetPendingR2(true), PendingSync.R2 debe ser true")
+	}
+}
+

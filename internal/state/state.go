@@ -8,12 +8,34 @@ import (
 	"time"
 )
 
+// PendingSync agrupa las sincronizaciones remotas pendientes.
+type PendingSync struct {
+	R2 bool `json:"r2"`
+}
+
 // State es el estado persistente del agente (state.json junto al binario).
 // last_run_date usa formato YYYY-MM-DD para la idempotencia diaria.
 type State struct {
-	LastRunDate    string `json:"last_run_date"`
-	LastBackupFile string `json:"last_backup_file"`
-	SHA256         string `json:"sha256"`
+	LastRunDate      string      `json:"last_run_date"`
+	LastBackupFile   string      `json:"last_backup_file"`
+	SHA256           string      `json:"sha256"`
+	PendingSync      PendingSync `json:"pending_sync"`
+	R2LastSyncedFile string      `json:"r2_last_synced_file,omitempty"`
+}
+
+// SetPendingR2 actualiza el flag de sincronización pendiente a R2.
+func (s *State) SetPendingR2(pending bool) {
+	if s != nil {
+		s.PendingSync.R2 = pending
+	}
+}
+
+// MarkR2Synced marca la sincronización a R2 como completa y registra el archivo.
+func (s *State) MarkR2Synced(filename string) {
+	if s != nil {
+		s.PendingSync.R2 = false
+		s.R2LastSyncedFile = filename
+	}
 }
 
 // dateLayout es el formato canónico de LastRunDate.
