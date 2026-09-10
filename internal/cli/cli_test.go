@@ -128,22 +128,14 @@ func TestStatusCmd_Execution(t *testing.T) {
 	}
 }
 
-func TestInteractive_Option3StatusThenExit(t *testing.T) {
+func TestInteractive_LaunchAndQuit(t *testing.T) {
 	app := testApp(t)
-	input := "3\n6\n"
-	in := strings.NewReader(input)
+	in := strings.NewReader("q")
 	var outBuf bytes.Buffer
 
 	err := runInteractive(context.Background(), app, t.TempDir(), in, &outBuf)
 	if err != nil {
 		t.Fatalf("runInteractive falló: %v", err)
 	}
-
-	outStr := outBuf.String()
-	if !strings.Contains(outStr, "Estado Actual") || !strings.Contains(outStr, "CONTABILIDAD") {
-		t.Errorf("menú interactivo no mostró estado:\n%s", outStr)
-	}
-	if !strings.Contains(outStr, "Saliendo...") {
-		t.Errorf("menú interactivo no procesó salida:\n%s", outStr)
-	}
 }
+

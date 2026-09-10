@@ -76,10 +76,10 @@ func (m dashboardModel) view() string {
 			var icon, statusStr string
 			if !backend.Configured {
 				icon = s.Muted.Render("○")
-				statusStr = s.Muted.Render("No configurado")
+				statusStr = s.Muted.Render("Not configured")
 			} else if backend.PendingSync {
 				icon = s.Warning.Render("●")
-				statusStr = s.Warning.Render("PENDIENTE")
+				statusStr = s.Warning.Render("PENDING")
 			} else if backend.LastSyncOK {
 				icon = s.Success.Render("●")
 				statusStr = s.Success.Render("OK")
@@ -87,6 +87,7 @@ func (m dashboardModel) view() string {
 				icon = s.Error.Render("●")
 				statusStr = s.Error.Render("ERROR")
 			}
+
 
 			nameStyled := s.Value.Render(fmt.Sprintf("%-12s", backend.Name))
 			b.WriteString(fmt.Sprintf("  %s %s %s\n", icon, nameStyled, statusStr))

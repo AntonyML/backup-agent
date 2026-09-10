@@ -1,10 +1,11 @@
-# FEMUCARIBE Backup Agent — Fase 1, 2 & 2.1
+# FEMUCARIBE Backup Agent — Fase 1, 2, 2.1 & 2.2
 
-Agente de backups para SQL Server `CONTABILIDAD` con arquitectura desacoplada (Clean/Hexagonal Architecture), CLI moderno con Cobra, subida a **Cloudflare R2** (S3 compatible), protección de credenciales con **Windows DPAPI**, y preparación para backend de servidor en Fase 3.
+Agente de backups para SQL Server `CONTABILIDAD` con arquitectura hexagonal limpia, interfaz gráfica de terminal moderna (**TUI** con Bubble Tea v2, Bubbles v2, Lip Gloss v2 y Glamour v2), subida a **Cloudflare R2** (S3 compatible), protección de credenciales con **Windows DPAPI** y soporte para ejecución desatendida vía Windows Task Scheduler.
 
 - **Fase 1:** Backup local en `C:\Backups\`, verificación `RESTORE VERIFYONLY`, hash SHA-256 por streaming, lock file contra concurrencia y rotación local (3 copias).
 - **Fase 2:** Subida a **Cloudflare R2** con verificación de integridad por tamaño, rotación remota a 1 copia, gestión segura de credenciales vía **Windows DPAPI** (`config.dat`) y tolerancia a fallos con `pending_sync`.
-- **Fase 2.1:** Refactor transversal: CLI migrado a **Cobra** con adaptadores delgados, desacoplamiento total de la capa de aplicación (`internal/application/`) de la consola/TTY, interfaz abstracta de almacenamiento (`storage.Backend`), clasificación de errores (`RetryableError`), logging estructurado con `log/slog`, y códigos de salida centralizados.
+- **Fase 2.1:** Refactor transversal: CLI con **Cobra**, desacoplamiento total de la capa de aplicación (`internal/application/`), interfaz de almacenamiento (`storage.Backend`), clasificación de errores (`RetryableError`), logging estructurado con `log/slog` y códigos de salida centralizados.
+- **Fase 2.2:** **Dashboard TUI completo**: Interfaz de terminal enriquecida con Bubble Tea v2, Bubbles v2 (viewport, textinput, spinner), Lip Gloss v2 y Glamour v2. Ejecución asíncrona sin bloquear el event loop, visor de logs con scroll, formulario de credenciales protegido y manual de ayuda integrado.
 
 ---
 
@@ -17,21 +18,38 @@ femucaribe-backup-agent/
 │       ├── main.go              # Punto de entrada ultra delgado (solo invoca cli.Execute())
 │       └── main_test.go
 ├── internal/
-│   ├── cli/                     # Adaptadores Cobra y modo interactivo por consola
+│   ├── ui/                      # Capa de presentación TUI (Bubble Tea v2, Lip Gloss, Glamour)
+│   │   ├── app.go               # Modelo raíz tea.Model y router de navegación
+│   │   ├── dashboard.go         # Pantalla principal (estado de copia y grilla de backends)
+│   │   ├── backup_progress.go   # Ejecución asíncrona de backup con spinner animado
+│   │   ├── sync.go              # Sincronización asíncrona a Cloudflare R2
+│   │   ├── status.go            # Vista detallada de parámetros del agente
+│   │   ├── logs.go              # Visor interactivo de logs diarios con viewport scrollable
+│   │   ├── configure.go         # Formulario de credenciales con textinput y password masking
+│   │   ├── help.go              # Visor de ayuda Markdown con Glamour y viewport
+│   │   ├── styles.go            # Paleta semántica y estilos centralizados de Lip Gloss v2
+│   │   ├── content/             # Documentación Markdown embebida (embed.FS)
+│   │   │   ├── about.md
+│   │   │   ├── backup-help.md
+│   │   │   ├── configuration-help.md
+│   │   │   └── troubleshooting.md
+│   │   └── ui_test.go
+│   ├── cli/                     # Adaptadores Cobra y launcher TUI
 │   │   ├── root.go              # Comando raíz, detección de TTY y mapeo de Exit Codes
 │   │   ├── backup.go            # Subcomando 'agent backup'
 │   │   ├── sync.go              # Subcomando 'agent sync'
 │   │   ├── status.go            # Subcomando 'agent status'
 │   │   ├── logs.go              # Subcomando 'agent logs'
 │   │   ├── configure.go         # Subcomando 'agent configure'
-│   │   ├── interactive.go       # Menú interactivo por TTY
+│   │   ├── interactive.go       # Launcher de Bubble Tea (tea.NewProgram)
 │   │   └── cli_test.go
-│   ├── application/             # Casos de uso de negocio (100% desacoplados de Cobra y stdin)
+│   ├── application/             # Casos de uso de negocio (100% desacoplados de Cobra, TUI y TTY)
 │   │   ├── app.go               # Orquestador del ciclo de vida y constructor de dependencias
 │   │   ├── backup.go            # Pipeline completo de backup
 │   │   ├── sync.go              # Reintento de sincronizaciones pendientes
 │   │   ├── status.go            # Consulta de estado consolidado
 │   │   ├── logs.go              # Lectura de registros del día
+│   │   ├── dto.go               # DTOs de presentación para la TUI
 │   │   ├── errors.go            # Errores centinela de aplicación
 │   │   └── app_test.go
 │   ├── storage/                 # Abstracción de destinos de almacenamiento
@@ -70,26 +88,10 @@ El agente busca junto al binario:
 | Archivo       | Tipo / Formato | Descripción |
 |---------------|----------------|-------------|
 | `config.json` | JSON (texto)   | Parámetros locales opcionales: `backup_dir`, `server`, `database`, `retain` (default 3), timeouts. |
-| `config.dat`  | Binario cifrado| Credenciales de R2 cifradas con Windows DPAPI vía `backup-agent configure`: Endpoint, Bucket, Access Key, Secret Key. |
+| `config.dat`  | Binario cifrado| Credenciales de R2 cifradas con Windows DPAPI: Endpoint, Bucket, Access Key, Secret Key. |
 | `state.json`  | JSON (texto)   | Estado persistente: `last_run_date`, `last_backup_file`, `sha256`, `pending_sync.r2`, `r2_last_synced_file`. |
 | `agent.lock`  | Texto con PID  | Lock file para evitar ejecuciones concurrentes y reclamar instancias muertas. |
 | `logs/`       | Directorio     | Archivos de log rotativos diarios: `agent-YYYY-MM-DD.log`. |
-
-### Configuración inicial de Cloudflare R2 (DPAPI)
-
-Para registrar o actualizar las credenciales de R2 de forma segura (sin texto plano en disco ni variables de entorno):
-
-```powershell
-.\bin\backup-agent.exe configure
-```
-
-El asistente interactivo solicitará:
-1. **Endpoint de R2**: ej: `https://<account_id>.r2.cloudflarestorage.com`
-2. **Nombre del Bucket**: ej: `femucaribe-backups`
-3. **R2 Access Key ID**
-4. **R2 Secret Access Key**
-
-Los valores se cifran usando `CryptProtectData` (DPAPI de Windows) con scope `CURRENT_USER` y se almacenan en `config.dat`. Solo se descifran en memoria RAM en tiempo de ejecución.
 
 ---
 
@@ -104,12 +106,51 @@ go build -o bin/backup-agent.exe ./cmd/backup-agent
 ### Comportamiento del Comando Raíz
 
 El binario puede ejecutarse directamente como `backup-agent.exe`:
-- **En entorno interactivo (con TTY):** Inicia automáticamente el menú interactivo por consola.
+- **En entorno interactivo (con TTY):** Inicia automáticamente el **Dashboard TUI**.
 - **En entorno desatendido (sin TTY / Task Scheduler):** Muestra el mensaje de ayuda (`--help`) y finaliza con código de salida `1` (`ExitGeneralErr`), **sin bloquear esperando entrada por stdin**.
 
-Para automatizaciones o tareas programadas, los comandos deben ser **siempre explícitos**.
+---
 
-### Subcomandos Disponibles
+## Interfaz de Terminal (TUI Dashboard)
+
+Al ejecutar `backup-agent.exe` en una consola o terminal interactiva (o mediante `backup-agent interactive`), se abre el dashboard visual:
+
+```text
+╭────────────────────────────────────────────────────────────╮
+│ FEMUCARIBE BACKUP AGENT                         v2.2       │
+├────────────────────────────────────────────────────────────┤
+│  ESTADO DEL BACKUP                                         │
+│  Última copia:    2026-09-10 12:00:00                      │
+│  Archivo:         CONTABILIDAD_20260910_1200.bak           │
+│  SHA-256:         5e884898da28047151d0...                  │
+│  Resultado:       ● EXITOSO                                │
+│                                                            │
+│  DESTINOS DE ALMACENAMIENTO                                │
+│  ● Local          OK                                       │
+│  ● R2             OK / PENDING / ERROR                     │
+│  ○ Server         Not configured                           │
+├────────────────────────────────────────────────────────────┤
+│  [B] Backup  [S] Estado  [L] Logs  [C] Config  [Y] Sync    │
+│  [H] Ayuda   [Q] Salir                                     │
+╰────────────────────────────────────────────────────────────╯
+```
+
+### Navegación y Pantallas de la TUI
+
+| Tecla | Pantalla / Acción | Descripción |
+|:-----:|-------------------|-------------|
+| **`B`** | **Ejecución de Backup** | Dispara el pipeline completo en segundo plano (asíncrono vía `tea.Cmd`) mostrando un spinner animado `Dot` y el estado por etapa (SQL Server, Local, R2) sin congelar la interfaz. |
+| **`S`** | **Estado Detallado** | Consulta los parámetros de base de datos, ruta de retención, lock file y estado remoto de R2. |
+| **`L`** | **Visor de Logs** | Despliega las últimas 100 líneas del log del día en un `viewport` interactivo con soporte de scroll (flechas, `PgUp`/`PgDn` y rueda del mouse) y recarga con `[R]`. |
+| **`C`** | **Configuración R2** | Formulario interactivo con `textinput` para Endpoint, Bucket, Access Key y Secret Key (con máscara de contraseña `EchoPassword`). Cifra y guarda de forma segura con Windows DPAPI en `config.dat`. |
+| **`Y`** | **Sincronización R2** | Reintenta en segundo plano cualquier subida pendiente a Cloudflare R2 con spinner activo. |
+| **`H`** | **Manual y Ayuda** | Visor de documentación Markdown renderizada con **Glamour** en modo oscuro. Permite alternar entre temas presionando `[1]` (Acerca de), `[2]` (Ciclo de Backup), `[3]` (Configuración) y `[4]` (Resolución de Problemas). |
+| **`Esc`** | **Volver** | Regresa inmediatamente al Dashboard principal desde cualquier pantalla. |
+| **`Q`** | **Salir** | Cierra la aplicación de forma limpia. |
+
+---
+
+## Subcomandos para Automatización y Scripts
 
 #### 1. Ejecutar Backup (`backup`)
 
@@ -146,12 +187,6 @@ Para automatizaciones o tareas programadas, los comandos deben ser **siempre exp
 .\bin\backup-agent.exe status
 ```
 
-Muestra en formato tabular o de clave-valor:
-- Última fecha de ejecución.
-- Ruta del último archivo de backup generado y su hash SHA-256.
-- Estado de sincronización pendiente (`pending_sync.r2`).
-- Último archivo confirmado en R2.
-
 #### 4. Consultar Logs Recientes (`logs`)
 
 ```powershell
@@ -162,34 +197,15 @@ Muestra en formato tabular o de clave-valor:
 .\bin\backup-agent.exe logs -n 50
 ```
 
-#### 5. Configuración de Credenciales (`configure`)
+#### 5. Configuración por Consola (`configure`)
 
 ```powershell
 .\bin\backup-agent.exe configure
 ```
 
-#### 6. Menú Interactivo (`interactive`)
-
-```powershell
-.\bin\backup-agent.exe interactive
-```
-
-Despliega el menú de operaciones en pantalla:
-```text
-=== FEMUCARIBE Backup Agent ===
-1. Configurar credenciales R2 (DPAPI)
-2. Ejecutar backup ahora
-3. Ver estado del agente
-4. Ver logs recientes
-5. Forzar sincronización pendiente
-6. Salir
-```
-
 ---
 
 ## Códigos de Salida Centralizados (Exit Codes)
-
-El agente define una convención estricta y predecible de códigos de salida para su integración con sistemas de monitoreo y Windows Task Scheduler:
 
 | Código | Constante         | Significado |
 |:------:|-------------------|-------------|
@@ -211,15 +227,11 @@ Para la ejecución desatendida en producción:
    - **Iniciar en:** `C:\Agente\`
 2. **Disparadores (Triggers):**
    - Disparador programado diario (ej: `23:00`).
-   - Disparador al iniciar el sistema (*At startup*) con un retraso de 5 a 10 minutos para asegurar que SQL Server esté en línea.
-3. **Condiciones y Seguridad:**
-   - Marcar *"Ejecutar tanto si el usuario inició sesión como si no"*.
-   - Marcar *"Ejecutar con los privilegios más altos"*.
-   - Usar la cuenta de servicio de Windows que posee permisos sobre la base de datos SQL y bajo la cual se ejecutó `backup-agent configure` (para acceso a DPAPI).
+   - Disparador al iniciar el sistema (*At startup*) con retraso de 5 a 10 minutos para asegurar que SQL Server esté en línea.
+3. **Seguridad:**
+   - Cuenta de servicio con permisos en SQL Server y DPAPI.
 
 ### Monitoreo de Logs en Vivo
-
-Los logs se escriben mediante `log/slog` con flush inmediato a archivos diarios en formato estándar estructurado:
 
 ```powershell
 Get-Content C:\Agente\logs\agent-2026-09-10.log -Wait
@@ -229,22 +241,19 @@ Get-Content C:\Agente\logs\agent-2026-09-10.log -Wait
 
 ## Verificación y Tests
 
-El proyecto cuenta con cobertura de pruebas unitarias sobre todas las capas del sistema sin dependencias externas:
-
 ```powershell
-# Ejecutar análisis estático
+# Análisis estático
 go vet ./...
 
-# Ejecutar suite de pruebas completa sin caché
+# Suite completa de pruebas unitarias sin caché
 go test -count=1 -v ./...
 ```
 
 Cubre:
-- Comandos Cobra, parsing de flags y mapeo de códigos de salida (`internal/cli`).
-- Comportamiento del comando raíz con y sin TTY.
-- Casos de uso de la capa de aplicación (`Backup`, `Sync`, `Status`, `TailLogs`) con mocks de motor SQL y backends.
+- Pruebas del modelo TUI Bubble Tea v2 (`internal/ui/ui_test.go`), transiciones entre pantallas y renderizado de backends.
+- Test estático AST de arquitectura (garantía de que `internal/ui` nunca importa `storage` ni `state`).
+- Comandos Cobra y parsing de flags (`internal/cli`).
+- Casos de uso de la capa de aplicación con mocks (`internal/application`).
 - Aislamiento de la interfaz `Backend` y clasificación con `RetryableError`.
-- Descarte de archivos temporales huérfanos (`.bak.tmp`) tras caídas abruptas.
-- Reemplazo atómico de archivos.
-- Cifrado DPAPI y persistencia segura de credenciales.
-- Idempotencia diaria y gestión de `pending_sync`.
+- Descarte de archivos temporales huérfanos (`.bak.tmp`) y renombrado atómico.
+- Cifrado DPAPI y persistencia segura de credenciales (`internal/secrets`).
