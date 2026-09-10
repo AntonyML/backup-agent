@@ -101,6 +101,9 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 
 	// Paso 1: Ejecución con Supabase ONLINE -> Todo OK
 	t.Run("Paso1_SupabaseOnline_BackupExitoso", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		err := app.Backup(ctx, application.BackupOptions{Force: true})
 		if err != nil {
 			t.Fatalf("Backup falló con Supabase online: %v", err)
@@ -119,6 +122,9 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 
 	// Paso 2: Caída de Supabase -> Backup DEBE CONTINUAR y guardar en state.PendingEvents
 	t.Run("Paso2_CaidaSupabase_BackupContinuaYGuardaPendientes", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		serverDown.Store(true)
 
 		// Limpiar estado de ejecución previa para permitir nueva corrida
@@ -143,6 +149,9 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 
 	// Paso 3: Recuperación -> Sync vacía PendingEvents hacia Supabase
 	t.Run("Paso3_Recuperacion_SyncVaciaPendientes", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		serverDown.Store(false)
 		prevCount := receivedCount.Load()
 
@@ -165,6 +174,9 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 
 	// Paso 4: Probar Idempotencia / Duplicados con PostgREST
 	t.Run("Paso4_Idempotencia_DuplicadosIgnorados", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		// Enviar el mismo evento dos veces directamente a través del repository
 		evt := events.NewEvent(events.TypeBackupCompleted, events.StatusSuccess)
 		evt.EventID = "evt_test_idempotency_123"
@@ -184,6 +196,10 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 // TestSupabase_LiveRemoteProject prueba la integración real con Supabase en la nube
 // (oxpxyiucnzpedawwkosy) con la anon key.
 func TestSupabase_LiveRemoteProject(t *testing.T) {
+	if os.Getenv("SUPABASE_LIVE_TEST") != "true" {
+		t.Skip("omitiendo test remoto en vivo; definir SUPABASE_LIVE_TEST=true para ejecutar contra la nube")
+	}
+
 	anonKey := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im94cHh5aXVjbnpwZWRhd3drb3N5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkwNTkwODAsImV4cCI6MjEwNDYzNTA4MH0.ryk8Ir6KKevqLFGIgSgm2ISb7tYLL3xzHzmy-58RBeI"
 	remoteURL := "https://oxpxyiucnzpedawwkosy.supabase.co"
 

@@ -10,6 +10,10 @@
     "remote_path": "\\\\ServidorBackup\\Backups\\CONTABILIDAD\\",
     "keep": 10,
     "timeout_sec": 300
+  },
+  "supabase": {
+    "enabled": false,
+    "url": "https://oxpxyiucnzpedawwkosy.supabase.co",
+    "timeout_sec": 10
   }
 }
-

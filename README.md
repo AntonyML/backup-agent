@@ -1,12 +1,13 @@
-# FEMUCARIBE Backup Agent — Fase 1, 2, 2.1, 2.2 & 3
+# FEMUCARIBE Backup Agent — Fase 1, 2, 2.1, 2.2, 3 & 4
 
-Agente de backups para SQL Server `CONTABILIDAD` con arquitectura hexagonal limpia, interfaz gráfica de terminal moderna (**TUI** con Bubble Tea v2, Bubbles v2, Lip Gloss v2 y Glamour v2), subida a **Cloudflare R2** (S3 compatible), copia segura a **Servidor Remoto Windows / UNC** con rotación a 10 copias, protección de credenciales con **Windows DPAPI** y soporte para ejecución desatendida vía Windows Task Scheduler.
+Agente de backups para SQL Server `CONTABILIDAD` con arquitectura hexagonal limpia, interfaz gráfica de terminal moderna (**TUI** con Bubble Tea v2, Bubbles v2, Lip Gloss v2 y Glamour v2), subida a **Cloudflare R2** (S3 compatible), copia segura a **Servidor Remoto Windows / UNC** con rotación a 10 copias, observabilidad centralizada en **Supabase** (PostgREST API), protección de credenciales con **Windows DPAPI** y soporte para ejecución desatendida vía Windows Task Scheduler.
 
 - **Fase 1:** Backup local en `C:\Backups\`, verificación `RESTORE VERIFYONLY`, hash SHA-256 por streaming, lock file contra concurrencia y rotación local (3 copias).
 - **Fase 2:** Subida a **Cloudflare R2** con verificación de integridad por tamaño, rotación remota a 1 copia, gestión segura de credenciales vía **Windows DPAPI** (`config.dat`) y tolerancia a fallos con `pending_sync.r2`.
 - **Fase 2.1:** Refactor transversal: CLI con **Cobra**, desacoplamiento total de la capa de aplicación (`internal/application/`), interfaz de almacenamiento (`storage.Backend`), clasificación de errores (`RetryableError`), logging estructurado con `log/slog` y códigos de salida centralizados.
 - **Fase 2.2:** **Dashboard TUI completo**: Interfaz de terminal enriquecida con Bubble Tea v2, Bubbles v2 (viewport, textinput, spinner), Lip Gloss v2 y Glamour v2. Ejecución asíncrona sin bloquear el event loop, visor de logs con scroll, formulario de credenciales protegido y manual de ayuda integrado.
 - **Fase 3:** **Copia a Servidor Remoto / Recurso Compartido (UNC)**: Transferencia segura mediante archivo temporal `.bak.tmp`, verificación estricta de integridad (doble validación de tamaño idéntico y SHA-256 por streaming), renombrado atómico, rotación de 10 copias más recientes, tolerancia a fallos con `pending_sync.server` y no destrucción de backups previos.
+- **Fase 4:** **Registro Centralizado de Eventos en Supabase**: Observabilidad operacional centralizada mediante PostgREST API sobre HTTPS, buffering resiliente de eventos en `state.json` (`pending_events`), garantía de cero impacto en backups locales o remotos ante fallos de red, idempotencia estricta por `event_id`, y gestión de esquemas e infraestructura mediante el CLI oficial de Supabase.
 
 ---
 
@@ -45,32 +46,44 @@ femucaribe-backup-agent/
 │   │   ├── interactive.go       # Launcher de Bubble Tea (tea.NewProgram)
 │   │   └── cli_test.go
 │   ├── application/             # Casos de uso de negocio (100% desacoplados de Cobra, TUI y TTY)
-│   │   ├── app.go               # Orquestador del ciclo de vida y constructor de dependencias
-│   │   ├── backup.go            # Pipeline completo de backup
-│   │   ├── sync.go              # Reintento de sincronizaciones pendientes (R2 + Server)
+│   │   ├── app.go               # Orquestador del ciclo de vida y buffering de eventos
+│   │   ├── backup.go            # Pipeline completo de backup y emisión de eventos operacionales
+│   │   ├── sync.go              # Reintento de sincronizaciones pendientes (R2, Server y Supabase)
 │   │   ├── status.go            # Consulta de estado consolidado
 │   │   ├── logs.go              # Lectura de registros del día
 │   │   ├── dto.go               # DTOs de presentación para la TUI
 │   │   ├── errors.go            # Errores centinela de aplicación
 │   │   └── app_test.go
+│   ├── events/                  # Modelo y repositorio de eventos para Supabase (Fase 4)
+│   │   ├── event.go             # Entidad Event, constantes canónicas y sentinel errors
+│   │   ├── supabase.go          # Cliente PostgREST con idempotencia y reintentos
+│   │   └── event_test.go
 │   ├── storage/                 # Abstracción de destinos de almacenamiento
 │   │   ├── backend.go           # Interfaz Backend y RetryableError
 │   │   ├── local/               # Backend de almacenamiento local en disco
 │   │   ├── r2/                  # Backend de Cloudflare R2 (S3 compatible)
 │   │   └── server/              # Backend para servidor remoto Windows / UNC (Fase 3)
 │   ├── secrets/                 # Cifrado DPAPI (Windows) y gestión de config.dat
-│   ├── logging/                 # Logging estructurado con log/slog y rotación diaria
-│   ├── config/                  # Carga y validación de config.json
-│   ├── state/                   # Persistencia atómica de estado en state.json
-│   ├── lock/                    # Exclusión mutua (agent.lock con PID) y detección de huérfanos
-│   ├── hasher/                  # Hash SHA-256 por streaming
-│   ├── rotation/                # Algoritmo de retención y poda de backups locales
-│   └── sqlbackup/               # Operaciones directas sobre SQL Server (go-mssqldb)
-├── bin/                         # Binario compilado
-├── config.example.json          # Plantilla de configuración
-├── go.mod
-├── go.sum
-└── README.md
+│   │   ├── logging/             # Logging estructurado con log/slog y rotación diaria
+│   │   ├── config/              # Carga y validación de config.json
+│   │   ├── state/               # Persistencia atómica de estado en state.json
+│   │   ├── lock/                # Exclusión mutua (agent.lock con PID) y detección de huérfanos
+│   │   ├── hasher/              # Hash SHA-256 por streaming
+│   │   ├── rotation/            # Algoritmo de retención y poda de backups locales
+│   │   ├── sqlbackup/           # Operaciones directas sobre SQL Server (go-mssqldb)
+│   │   └── version/             # Información de versión del binario (v4.0.0)
+│   ├── supabase/                # Configuración y migraciones oficiales de Supabase CLI
+│   │   ├── config.toml          # Configuración del proyecto local/remoto
+│   │   └── migrations/          # Migraciones SQL versionadas
+│   ├── test/                    # Suite de testing aislada y suites de integración
+│   │   ├── integration/         # Tests de integración (backup, recovery, rotation, server, supabase)
+│   │   ├── testdb/              # Adaptadores SQLite y SQL Server
+│   │   └── testenv/             # Guardián de seguridad anti-producción
+│   ├── bin/                     # Binario compilado
+│   ├── config.example.json      # Plantilla de configuración
+│   ├── go.mod
+│   ├── go.sum
+│   └── README.md
 ```
 
 ---
@@ -89,11 +102,21 @@ El agente busca junto al binario:
 
 | Archivo       | Tipo / Formato | Descripción |
 |---------------|----------------|-------------|
-| `config.json` | JSON (texto)   | Parámetros locales y remotos: `backup_dir`, `server`, `database`, `retain` (local, default 3), `remote_server` (`enabled`, `remote_path`, `keep` default 10, `timeout_sec`). |
+| `config.json` | JSON (texto)   | Parámetros locales y remotos: `backup_dir`, `server`, `database`, `retain` (local, default 3), `remote_server` (`enabled`, `remote_path`, `keep` default 10, `timeout_sec`), `supabase` (`enabled`, `url`, `timeout_sec`). |
 | `config.dat`  | Binario cifrado| Credenciales de R2 cifradas con Windows DPAPI: Endpoint, Bucket, Access Key, Secret Key. |
-| `state.json`  | JSON (texto)   | Estado persistente: `last_run_date`, `last_backup_file`, `sha256`, `pending_sync` (`r2`, `server`), `r2_last_synced_file`, `server_last_synced_file`. |
+| `state.json`  | JSON (texto)   | Estado persistente: `last_run_date`, `last_backup_file`, `sha256`, `pending_sync` (`r2`, `server`), `r2_last_synced_file`, `server_last_synced_file`, `pending_events` (eventos de Supabase en buffer resiliente). |
 | `agent.lock`  | Texto con PID  | Lock file para evitar ejecuciones concurrentes y reclamar instancias muertas. |
 | `logs/`       | Directorio     | Archivos de log rotativos diarios: `agent-YYYY-MM-DD.log`. |
+
+### Variables de Entorno (Credenciales de Supabase)
+
+Por principio de seguridad, las credenciales de Supabase **nunca** se almacenan en `config.json`. El agente las resuelve automáticamente a través del entorno:
+
+| Variable | Propósito | Ejemplo |
+|---|---|---|
+| `SUPABASE_KEY` / `SUPABASE_API_KEY` | API Key pública (`anon`) o de servicio para autenticación PostgREST | `eyJhbGciOi...` |
+| `SUPABASE_ACCESS_TOKEN` | Token de acceso personal para Supabase CLI / fallback de API | `sbp_...` |
+| `SUPABASE_URL` | Sobrescritura opcional del endpoint HTTP | `https://oxpxyiucnzpedawwkosy.supabase.co` |
 
 ---
 
@@ -301,6 +324,130 @@ Si durante el ciclo diario de backup el servidor remoto no responde o la red fal
 
 ---
 
+## Observabilidad y Registro Centralizado en Supabase (Fase 4)
+
+El agente incorpora telemetría y auditoría centralizada en la nube consumiendo la API PostgREST de **Supabase** sobre HTTPS, permitiendo monitorear el estado operativo de todas las instancias de backup en tiempo real.
+
+### Principio de Diseño: Cero Impacto en Backups
+
+- **Log local primario y autoritativo:** El registro estructurado en disco (`logs/agent-YYYY-MM-DD.log`) es la fuente de verdad incondicional. Supabase actúa exclusivamente como agregador secundario de observabilidad.
+- **Tolerancia a fallos absoluta:** La caída de red, timeouts, errores 5xx o rate limiting de Supabase **JAMÁS cancelan ni marcan como fallido un backup local o remoto**.
+- **Buffering resiliente (`pending_events`):** Todo evento que no pueda transmitirse de inmediato se almacena en disco dentro de `state.json`.
+- **Vaciado y reintento automático:** Al ejecutar `agent sync` o en el siguiente ciclo de `agent backup`, los eventos acumulados se retransmiten hacia Supabase.
+- **Idempotencia estricta:** Cada evento posee un identificador criptográfico único (`event_id` con formato `evt_<hex32>`). El cliente PostgREST envía la cabecera `Prefer: return=minimal,resolution=ignore-duplicates`, evitando registros duplicados o errores en caso de retransmisión.
+
+---
+
+### Gestión de Infraestructura con Supabase CLI
+
+Toda la infraestructura y esquema de Supabase está estrictamente versionada en el repositorio bajo `supabase/`:
+
+#### 1. Instalación del Supabase CLI
+
+En Windows vía Scoop (recomendado):
+
+```powershell
+scoop bucket add supabase https://github.com/supabase/scoop-bucket.git
+scoop install supabase
+```
+
+#### 2. Autenticación y Vinculación
+
+```powershell
+# Autenticarse con el Personal Access Token de la organización
+supabase login
+
+# Inicializar configuración local del repositorio (genera supabase/config.toml)
+supabase init
+
+# Vincular al proyecto oficial de FEMUCARIBE
+supabase link --project-ref oxpxyiucnzpedawwkosy
+```
+
+> **Proyecto Oficial:** `oxpxyiucnzpedawwkosy` (*soporte@femucaribe.go.cr's Project*, Postgres 17.6, región `us-east-1`).
+
+#### 3. Despliegue de Migraciones
+
+La estructura de la base de datos se mantiene en `supabase/migrations/20260910180000_create_backup_events.sql`. Para aplicar cambios al entorno de producción:
+
+```powershell
+# Previsualizar cambios sin aplicarlos
+supabase db push --project-ref oxpxyiucnzpedawwkosy --dry-run
+
+# Aplicar migraciones directamente
+supabase db push --project-ref oxpxyiucnzpedawwkosy
+```
+
+#### 4. Entorno de Desarrollo Local (Opcional con Docker)
+
+Si se dispone de Docker Desktop en la máquina de desarrollo, es posible levantar el stack completo de Supabase en local:
+
+```powershell
+# Iniciar servicios locales (Postgres, PostgREST, Studio en http://localhost:54323)
+supabase start
+
+# Detener servicios locales
+supabase stop
+```
+
+---
+
+### Configuración del Agente
+
+1. En `config.json`, habilitar el bloque `supabase`:
+   ```json
+   "supabase": {
+     "enabled": true,
+     "url": "https://oxpxyiucnzpedawwkosy.supabase.co",
+     "timeout_sec": 10
+   }
+   ```
+2. Configurar la clave API en la variable de entorno del sistema o de la sesión:
+   ```powershell
+   $env:SUPABASE_KEY="eyJhbGciOi..."
+   ```
+
+---
+
+### Catálogo Canónico de Eventos
+
+| Tipo de Evento | Momento de Emisión | Status Típicos |
+|---|---|---|
+| `agent_started` | Inicio de ejecución del comando `backup` | `RUNNING` |
+| `backup_started` | Inicio de la operación `BACKUP DATABASE` en SQL Server | `RUNNING` |
+| `local_backup_completed` | Backup local generado y validado con `RESTORE VERIFYONLY` | `SUCCESS` |
+| `local_rotation_completed` | Poda de copias locales antiguas según política de retención | `SUCCESS` |
+| `local_rotation_failed` | Fallo al podar copias locales antiguas | `FAILED` |
+| `r2_sync_completed` | Archivo `.bak` sincronizado a Cloudflare R2 | `SUCCESS` |
+| `r2_sync_failed` | Fallo de conexión o transferencia a Cloudflare R2 | `FAILED` |
+| `server_sync_completed` | Archivo `.bak` sincronizado al Servidor Remoto / UNC | `SUCCESS` |
+| `server_sync_failed` | Fallo de transferencia o validación en Servidor Remoto | `FAILED` |
+| `server_rotation_completed`| Poda de copias antiguas en Servidor Remoto | `SUCCESS` |
+| `server_rotation_failed` | Fallo al podar copias en Servidor Remoto | `FAILED` |
+| `pending_sync` | Se marcaron transferencias diferidas para `agent sync` | `PENDING` |
+| `backup_completed` | Ciclo de backup finalizado con éxito | `SUCCESS` |
+| `backup_failed` | Fallo crítico en el proceso de backup (error higienizado) | `FAILED` |
+| `agent_finished` | Finalización de la corrida del agente con duración total en ms | `SUCCESS` / `FAILED` |
+
+---
+
+### Consulta y Auditoría de Eventos
+
+#### Vía PostgREST API (PowerShell)
+
+```powershell
+$headers = @{
+    "apikey" = $env:SUPABASE_KEY
+    "Authorization" = "Bearer $env:SUPABASE_KEY"
+}
+Invoke-RestMethod -Uri "https://oxpxyiucnzpedawwkosy.supabase.co/rest/v1/backup_events?order=timestamp.desc&limit=10" -Headers $headers
+```
+
+#### Vía Supabase Studio
+Acceder al Table Editor en la consola web de Supabase para visualizar gráficos de actividad, filtrar por `status = 'FAILED'`, o auditar el rendimiento por `duration_ms`.
+
+---
+
 ## Configuración en Windows Task Scheduler
 
 Para la ejecución desatendida en producción:
@@ -391,14 +538,26 @@ Valida el pipeline completo end-to-end simulando un servidor remoto en un filesy
 go test -v -count=1 ./test/integration/storage/...
 ```
 
-#### 4. Limpieza de Artefactos de Prueba
+#### 4. Tests de Integración y Resiliencia de Supabase (Fase 4)
+Valida el ciclo de vida de observabilidad y tolerancia a fallos:
+- Transmisión exitosa de eventos operativos en tiempo real.
+- Simulación de caída de servicio (HTTP 503): verificación de no bloqueo del backup y almacenamiento de eventos en `state.PendingEvents`.
+- Recuperación automática y vaciado de cola mediante `app.Sync()`.
+- Idempotencia estricta frente a retransmisiones duplicadas (`resolution=ignore-duplicates`).
+- Verificación directa contra endpoint remoto real de Supabase.
+
+```powershell
+go test -v -count=1 ./test/integration/supabase/...
+```
+
+#### 5. Limpieza de Artefactos de Prueba
 Elimina de forma segura carpetas temporales en `C:\BackupsTest\` protegiendo categóricamente `C:\Backups\`:
 
 ```powershell
 .\scripts\cleanup-test.ps1
 ```
 
-#### 5. Conservación de Artefactos para Diagnóstico
+#### 6. Conservación de Artefactos para Diagnóstico
 Si se desea inspeccionar los archivos generados tras una falla:
 
 ```powershell
