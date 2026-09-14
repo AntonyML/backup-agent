@@ -738,7 +738,8 @@ func (m settingsModel) viewFields(b *strings.Builder) {
 		if selected && m.editing {
 			b.WriteString(s.InputPrompt.Render("▶ " + label))
 			b.WriteString("\n")
-			b.WriteString("  " + m.input.View())
+			b.WriteString("  ")
+			b.WriteString(m.input.View())
 			b.WriteString("\n\n")
 			continue
 		}
