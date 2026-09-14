@@ -32,6 +32,12 @@ func NewRetryableError(err error) error {
 	return &RetryableError{Err: err}
 }
 
+// Retryable marca este error como transitorio para la política de reintentos de
+// internal/retry (satisface retry.Retryable sin acoplar ese paquete a storage).
+func (e *RetryableError) Retryable() bool {
+	return e != nil
+}
+
 // Backend define el contrato de almacenamiento desacoplado de estado y configuración global.
 type Backend interface {
 	Name() string

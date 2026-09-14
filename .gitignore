@@ -9,3 +9,5 @@ state.json
 agent.lock
 .env
 .env.test
+# Local Pi runtime state
+.atl/
