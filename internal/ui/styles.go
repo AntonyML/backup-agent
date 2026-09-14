@@ -6,15 +6,21 @@ import (
 
 // Semantic colors
 var (
-	ColorGreen    = lipgloss.Color("#2ecc71") // éxito
-	ColorYellow   = lipgloss.Color("#f1c40f") // advertencia / pendiente
-	ColorRed      = lipgloss.Color("#e74c3c") // error
-	ColorBlue     = lipgloss.Color("#3498db") // información / primario
-	ColorGray     = lipgloss.Color("#7f8c8d") // secundario / muted
-	ColorDarkGray = lipgloss.Color("#34495e") // bordes secundarios
-	ColorWhite    = lipgloss.Color("#ecf0f1") // texto principal
+	ColorGreen         = lipgloss.Color("#4ade80") // éxito (emerald)
+	ColorYellow        = lipgloss.Color("#fbbf24") // advertencia / pendiente (amber)
+	ColorRed           = lipgloss.Color("#f87171") // error (coral)
+	ColorBlue          = lipgloss.Color("#38bdf8") // información / primario (sky)
+	ColorIndigo        = lipgloss.Color("#818cf8") // secundario de acento (indigo)
+	ColorGray          = lipgloss.Color("#94a3b8") // secundario / muted (slate-400)
+	ColorDarkGray      = lipgloss.Color("#334155") // bordes secundarios (slate-700)
+	ColorWhite         = lipgloss.Color("#f8fafc") // texto principal (slate-50)
+	ColorBgCard        = lipgloss.Color("#1e293b") // fondo panel (slate-800)
+	ColorBadgeGreenBg  = lipgloss.Color("#14532d")
+	ColorBadgeYellowBg = lipgloss.Color("#713f12")
+	ColorBadgeRedBg    = lipgloss.Color("#7f1d1d")
+	ColorBadgeBlueBg   = lipgloss.Color("#0c4a6e")
+	ColorBadgeMutedBg  = lipgloss.Color("#1e293b")
 )
-
 
 // Styles agrupa y centraliza los estilos de Lip Gloss para toda la interfaz TUI.
 type Styles struct {
@@ -35,6 +41,18 @@ type Styles struct {
 	Spinner       lipgloss.Style
 	InputPrompt   lipgloss.Style
 	TableBorder   lipgloss.Style
+
+	// Estilos modernos para layout modular tipo Lazygit / k9s / btop
+	Panel        lipgloss.Style
+	PanelActive  lipgloss.Style
+	CardHeader   lipgloss.Style
+	CardTitle    lipgloss.Style
+	BadgeSuccess lipgloss.Style
+	BadgeWarning lipgloss.Style
+	BadgeError   lipgloss.Style
+	BadgeMuted   lipgloss.Style
+	BadgeInfo    lipgloss.Style
+	StatusBar    lipgloss.Style
 }
 
 // DefaultStyles inicializa la paleta de estilos estándar.
@@ -110,5 +128,57 @@ func DefaultStyles() Styles {
 		TableBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorDarkGray),
+
+		Panel: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorDarkGray).
+			Padding(0, 1),
+
+		PanelActive: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorBlue).
+			Padding(0, 1),
+
+		CardHeader: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorBlue),
+
+		CardTitle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorWhite),
+
+		BadgeSuccess: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorGreen).
+			Background(ColorBadgeGreenBg).
+			Padding(0, 1),
+
+		BadgeWarning: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorYellow).
+			Background(ColorBadgeYellowBg).
+			Padding(0, 1),
+
+		BadgeError: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorRed).
+			Background(ColorBadgeRedBg).
+			Padding(0, 1),
+
+		BadgeMuted: lipgloss.NewStyle().
+			Foreground(ColorGray).
+			Background(ColorBadgeMutedBg).
+			Padding(0, 1),
+
+		BadgeInfo: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorBlue).
+			Background(ColorBadgeBlueBg).
+			Padding(0, 1),
+
+		StatusBar: lipgloss.NewStyle().
+			Foreground(ColorGray).
+			Background(ColorBgCard).
+			Padding(0, 1),
 	}
 }

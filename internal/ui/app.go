@@ -76,6 +76,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.dashboard.setSize(msg.Width, msg.Height)
+		m.settings.setSize(msg.Width, msg.Height)
+		m.status.setSize(msg.Width, msg.Height)
 		m.logs.setSize(msg.Width, msg.Height)
 		m.help.setSize(msg.Width, msg.Height)
 		return m, nil
@@ -250,6 +253,7 @@ func (m AppModel) View() tea.View {
 
 	v := tea.NewView(content)
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 

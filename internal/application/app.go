@@ -80,27 +80,34 @@ type App struct {
 	backends     []storage.Backend
 	localBackend storage.Backend
 	eventRepo    events.EventRepository
-	sqlEngine    SQLEngine
-	failpoint    FailpointHook
-	logger       *slog.Logger
+	sqlEngine     SQLEngine
+	failpoint     FailpointHook
+	logger        *slog.Logger
+	logController LogController
+}
+
+// LogController permite redirigir o silenciar la salida a consola del logger diario.
+type LogController interface {
+	SetOutput(io.Writer)
 }
 
 type Options struct {
-	Config       config.Config
-	ConfigPath   string
-	StatePath    string
-	SecretsPath  string
-	LockPath     string
-	LogDir       string
+	Config        config.Config
+	ConfigPath    string
+	StatePath     string
+	SecretsPath   string
+	LockPath      string
+	LogDir        string
 	// Profile es el nombre del perfil con el que opera esta instancia de App.
 	// Vacío = perfil activo de la config.
-	Profile      string
-	Backends     []storage.Backend
-	LocalBackend storage.Backend
-	EventRepo    events.EventRepository
-	SQLEngine    SQLEngine
-	Failpoint    FailpointHook
-	Logger       *slog.Logger
+	Profile       string
+	Backends      []storage.Backend
+	LocalBackend  storage.Backend
+	EventRepo     events.EventRepository
+	SQLEngine     SQLEngine
+	Failpoint     FailpointHook
+	Logger        *slog.Logger
+	LogController LogController
 }
 
 func New(opts Options) *App {
@@ -151,6 +158,19 @@ func New(opts Options) *App {
 		sqlEngine:    engine,
 		failpoint:    fp,
 		logger:       log,
+		logController: opts.LogController,
+	}
+}
+
+// MuteConsole silencia la salida a consola del logger diario (manteniendo la escritura a disco).
+// Devuelve una función para restaurar la salida a os.Stdout.
+func (a *App) MuteConsole() func() {
+	if a.logController == nil {
+		return func() {}
+	}
+	a.logController.SetOutput(nil)
+	return func() {
+		a.logController.SetOutput(os.Stdout)
 	}
 }
 

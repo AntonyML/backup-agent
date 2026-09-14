@@ -26,6 +26,11 @@ func newInteractiveCmd(exeDir string, appProvider func() (*application.App, erro
 }
 
 func runInteractive(ctx context.Context, app *application.App, exeDir string, in io.Reader, out io.Writer) error {
+	if app != nil {
+		restore := app.MuteConsole()
+		defer restore()
+	}
+
 	var opts []tea.ProgramOption
 	if in != nil {
 		opts = append(opts, tea.WithInput(in))

@@ -139,7 +139,7 @@ func BuildDefaultApp(exeDir string, cfgPath string, profile string) (*applicatio
 		return nil, err
 	}
 
-	logger, _ := logging.New(filepath.Join(exeDir, "logs"))
+	logger, writer := logging.New(filepath.Join(exeDir, "logs"))
 
 	statePath := filepath.Join(exeDir, "state.json")
 	// Lock POR PERFIL (D2): cada perfil tiene su propio agent-<perfil>.lock.
@@ -203,7 +203,8 @@ func BuildDefaultApp(exeDir string, cfgPath string, profile string) (*applicatio
 		Backends:     backends,
 		LocalBackend: localBackend,
 		EventRepo:    eventRepo,
-		Logger:       logger,
+		Logger:        logger,
+		LogController: writer,
 	}), nil
 }
 

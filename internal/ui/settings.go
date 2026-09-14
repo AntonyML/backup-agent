@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"femucaribe-backup-agent/internal/application"
 	"femucaribe-backup-agent/internal/scheduler"
@@ -123,6 +124,12 @@ type settingsModel struct {
 
 	// Estado cacheado de la tarea de Windows
 	taskStatusText string
+
+	// Viewport para scroll universal
+	viewport viewport.Model
+	width    int
+	height   int
+	ready    bool
 }
 
 func newSettingsModel(app AppConnector, styles Styles) settingsModel {
@@ -130,11 +137,110 @@ func newSettingsModel(app AppConnector, styles Styles) settingsModel {
 	in.CharLimit = 200
 	in.SetWidth(48)
 
+	vp := viewport.New()
+	vp.SetWidth(80)
+	vp.SetHeight(16)
+
 	return settingsModel{
-		app:    app,
-		styles: styles,
-		input:  in,
+		app:      app,
+		styles:   styles,
+		input:    in,
+		viewport: vp,
 	}
+}
+
+func (m *settingsModel) setSize(w, h int) {
+	m.width = w
+	m.height = h
+	vpWidth := w - 6
+	if vpWidth < 40 {
+		vpWidth = 40
+	}
+	vpHeight := h - 10
+	if vpHeight < 8 {
+		vpHeight = 8
+	}
+	m.viewport.SetWidth(vpWidth)
+	m.viewport.SetHeight(vpHeight)
+	m.ready = true
+	m.updateViewportContent()
+}
+
+func (m *settingsModel) ensureActiveVisible(content string) {
+	lines := strings.Split(content, "\n")
+	targetLine := -1
+	for i, l := range lines {
+		if strings.Contains(l, "▶") {
+			targetLine = i
+			break
+		}
+	}
+	if targetLine >= 0 {
+		m.viewport.EnsureVisible(targetLine, 0, 0)
+	}
+}
+
+func (m *settingsModel) buildBodyContent() string {
+	var body strings.Builder
+	switch m.level {
+	case settingsLevelGroups:
+		m.viewGroups(&body)
+	case settingsLevelFields:
+		switch m.groupIdx {
+		case groupProfiles:
+			m.viewProfiles(&body)
+		case groupPlatforms:
+			m.viewPlatformsMenu(&body)
+		default:
+			m.viewFields(&body)
+		}
+	case settingsLevelSub:
+		switch m.groupIdx {
+		case groupSchedule:
+			m.viewWindowsTaskSub(&body)
+		default:
+			m.viewFields(&body)
+		}
+	}
+
+	s := m.styles
+	if m.notice != "" {
+		body.WriteString("\n")
+		body.WriteString(s.Success.Render(m.notice))
+		body.WriteString("\n")
+	}
+	if m.err != nil {
+		body.WriteString("\n")
+		body.WriteString(s.Error.Render(fmt.Sprintf("✖ %v", m.err)))
+		body.WriteString("\n")
+	}
+
+	if strings.EqualFold(m.cfg.Schedule.Mode, "weekly") && len(m.cfg.Schedule.Weekdays) == 0 {
+		body.WriteString("\n")
+		body.WriteString(s.Warning.Render("⚠ Modo weekly activo sin días seleccionados."))
+	}
+	if m.cfg.Cloudflare.Enabled && m.app != nil {
+		creds, _ := m.app.GetR2Credentials()
+		if creds == nil || creds.Endpoint == "" || creds.Bucket == "" || creds.AccessKeyID == "" || creds.SecretAccessKey == "" {
+			body.WriteString("\n")
+			body.WriteString(s.Warning.Render("⚠ R2 habilitado pero faltan credenciales (cargalas en Credenciales R2)."))
+		}
+	}
+	if m.cfg.Schedule.SyncAfterBackup {
+		p, ok := m.cfg.ProfileByName(m.cfg.ActiveProfile)
+		if ok && len(p.Platforms) == 0 {
+			body.WriteString("\n")
+			body.WriteString(s.Warning.Render("⚠ sync_after_backup activo pero el perfil no tiene destinos remotos."))
+		}
+	}
+
+	return body.String()
+}
+
+func (m *settingsModel) updateViewportContent() {
+	bodyStr := m.buildBodyContent()
+	m.viewport.SetContent(bodyStr)
+	m.ensureActiveVisible(bodyStr)
 }
 
 func (m *settingsModel) load() {
@@ -155,6 +261,8 @@ func (m *settingsModel) load() {
 	if m.app != nil {
 		m.cfg = m.app.GetSettings()
 	}
+	m.viewport.GotoTop()
+	m.updateViewportContent()
 }
 
 // Grupos principales (Nivel 0)
@@ -685,7 +793,9 @@ func (m *settingsModel) update(msg tea.Msg) (*settingsModel, tea.Cmd) {
 			m.input, cmd = m.input.Update(msg)
 			return m, cmd
 		}
-		return m, nil
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 	}
 
 	// 1. Manejo de confirmModel modal activo
@@ -777,6 +887,11 @@ func (m *settingsModel) update(msg tea.Msg) (*settingsModel, tea.Cmd) {
 
 	// 5. Navegación normal según nivel
 	switch key.String() {
+	case "pgup", "pgdown":
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+
 	case "esc":
 		m.saved = false
 		m.err = nil
@@ -784,11 +899,15 @@ func (m *settingsModel) update(msg tea.Msg) (*settingsModel, tea.Cmd) {
 		if m.level == settingsLevelSub {
 			m.level = settingsLevelFields
 			m.subIdx = 0
+			m.viewport.GotoTop()
+			m.updateViewportContent()
 			return m, nil
 		}
 		if m.level == settingsLevelFields {
 			m.level = settingsLevelGroups
 			m.fieldIdx = 0
+			m.viewport.GotoTop()
+			m.updateViewportContent()
 			return m, nil
 		}
 		return m, func() tea.Msg { return backToDashboardMsg{} }
@@ -812,11 +931,15 @@ func (m *settingsModel) update(msg tea.Msg) (*settingsModel, tea.Cmd) {
 		if m.level == settingsLevelSub {
 			m.level = settingsLevelFields
 			m.subIdx = 0
+			m.viewport.GotoTop()
+			m.updateViewportContent()
 			return m, nil
 		}
 		if m.level == settingsLevelFields {
 			m.level = settingsLevelGroups
 			m.fieldIdx = 0
+			m.viewport.GotoTop()
+			m.updateViewportContent()
 			return m, nil
 		}
 
@@ -914,6 +1037,7 @@ func (m *settingsModel) move(delta int) {
 			}
 		}
 	}
+	m.updateViewportContent()
 }
 
 func (m *settingsModel) activate() (*settingsModel, tea.Cmd) {
@@ -926,6 +1050,8 @@ func (m *settingsModel) activate() (*settingsModel, tea.Cmd) {
 		}
 		m.level = settingsLevelFields
 		m.fieldIdx = 0
+		m.viewport.GotoTop()
+		m.updateViewportContent()
 		return m, nil
 	}
 
@@ -933,11 +1059,14 @@ func (m *settingsModel) activate() (*settingsModel, tea.Cmd) {
 		if m.groupIdx == groupPlatforms {
 			m.level = settingsLevelSub
 			m.subIdx = 0
+			m.viewport.GotoTop()
+			m.updateViewportContent()
 			return m, nil
 		}
 		if m.groupIdx == groupProfiles {
 			// Alternar o marcar como activo
 			m.useActiveProfile()
+			m.updateViewportContent()
 			return m, nil
 		}
 	}
@@ -1321,61 +1450,14 @@ func (m settingsModel) view() string {
 	}
 	b.WriteString("\n\n")
 
-	// Contenido según nivel
-	switch m.level {
-	case settingsLevelGroups:
-		m.viewGroups(&b)
-	case settingsLevelFields:
-		switch m.groupIdx {
-		case groupProfiles:
-			m.viewProfiles(&b)
-		case groupPlatforms:
-			m.viewPlatformsMenu(&b)
-		default:
-			m.viewFields(&b)
-		}
-	case settingsLevelSub:
-		switch m.groupIdx {
-		case groupSchedule:
-			m.viewWindowsTaskSub(&b)
-		default:
-			m.viewFields(&b)
-		}
-	}
+	// Contenido scrolleable a través del viewport
+	bodyStr := m.buildBodyContent()
+	m.viewport.SetContent(bodyStr)
+	m.ensureActiveVisible(bodyStr)
 
-	// Avisos contextuales y errores
-	if m.notice != "" {
-		b.WriteString("\n")
-		b.WriteString(s.Success.Render(m.notice))
-		b.WriteString("\n")
-	}
-	if m.err != nil {
-		b.WriteString("\n")
-		b.WriteString(s.Error.Render(fmt.Sprintf("✖ %v", m.err)))
-		b.WriteString("\n")
-	}
-
-	// Validaciones visibles de dependencias
-	if strings.EqualFold(m.cfg.Schedule.Mode, "weekly") && len(m.cfg.Schedule.Weekdays) == 0 {
-		b.WriteString("\n")
-		b.WriteString(s.Warning.Render("⚠ Modo weekly activo sin días seleccionados."))
-	}
-	if m.cfg.Cloudflare.Enabled {
-		creds, _ := m.app.GetR2Credentials()
-		if creds == nil || creds.Endpoint == "" || creds.Bucket == "" || creds.AccessKeyID == "" || creds.SecretAccessKey == "" {
-			b.WriteString("\n")
-			b.WriteString(s.Warning.Render("⚠ R2 habilitado pero faltan credenciales (cargalas en Credenciales R2)."))
-		}
-	}
-	if m.cfg.Schedule.SyncAfterBackup {
-		p, ok := m.cfg.ProfileByName(m.cfg.ActiveProfile)
-		if ok && len(p.Platforms) == 0 {
-			b.WriteString("\n")
-			b.WriteString(s.Warning.Render("⚠ sync_after_backup activo pero el perfil no tiene destinos remotos."))
-		}
-	}
-
+	b.WriteString(m.viewport.View())
 	b.WriteString("\n\n")
+
 	b.WriteString(s.HelpBar.Render(strings.Join(m.helpKeys(), "  ")))
 	b.WriteString("\n")
 	b.WriteString(s.Muted.Render("  Los cambios se guardan en config.json. Backends y credenciales se rearman al reiniciar el agente."))

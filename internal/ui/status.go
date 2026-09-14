@@ -5,57 +5,75 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"femucaribe-backup-agent/internal/application"
 )
 
 type statusModel struct {
-	app    AppConnector
-	styles Styles
-	report *application.StatusReport
-	checks []application.PlatformCheck
-	err    error
+	app      AppConnector
+	styles   Styles
+	report   *application.StatusReport
+	checks   []application.PlatformCheck
+	err      error
+	viewport viewport.Model
+	ready    bool
+	width    int
+	height   int
 }
 
 func newStatusModel(app AppConnector, styles Styles) statusModel {
+	vp := viewport.New()
+	vp.SetWidth(80)
+	vp.SetHeight(20)
+
 	return statusModel{
-		app:    app,
-		styles: styles,
+		app:      app,
+		styles:   styles,
+		viewport: vp,
 	}
+}
+
+func (m *statusModel) setSize(w, h int) {
+	m.width = w
+	m.height = h
+	vpWidth := w - 6
+	if vpWidth < 40 {
+		vpWidth = 40
+	}
+	vpHeight := h - 8
+	if vpHeight < 8 {
+		vpHeight = 8
+	}
+
+	m.viewport.SetWidth(vpWidth)
+	m.viewport.SetHeight(vpHeight)
+	m.ready = true
+	m.updateContent()
 }
 
 func (m *statusModel) loadStatus() {
 	if m.app == nil {
 		m.err = fmt.Errorf("no hay instancia de aplicación conectada")
+		m.updateContent()
 		return
 	}
 
 	report, err := m.app.Status(context.Background())
 	if err != nil {
 		m.err = err
+		m.updateContent()
 		return
 	}
 	m.report = report
 	m.checks = m.app.CheckPlatforms(context.Background())
 	m.err = nil
+	m.updateContent()
 }
 
-func (m *statusModel) update(msg tea.Msg) (*statusModel, tea.Cmd) {
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		if key.String() == "r" || key.String() == "R" {
-			m.loadStatus()
-			return m, nil
-		}
-	}
-	return m, nil
-}
-
-func (m statusModel) view() string {
+func (m *statusModel) updateContent() {
 	s := m.styles
 	var b strings.Builder
-
-	title := s.AppTitle.Render("ESTADO DETALLADO DEL AGENTE")
-	b.WriteString(fmt.Sprintf("%s\n\n", title))
 
 	if m.err != nil {
 		b.WriteString(s.Error.Render(fmt.Sprintf("Error obteniendo estado: %v\n\n", m.err)))
@@ -145,9 +163,36 @@ func (m statusModel) view() string {
 		b.WriteString("\n\n")
 	}
 
+	m.viewport.SetContent(b.String())
+}
+
+func (m *statusModel) update(msg tea.Msg) (*statusModel, tea.Cmd) {
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		if key.String() == "r" || key.String() == "R" {
+			m.loadStatus()
+			return m, nil
+		}
+	}
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+func (m statusModel) view() string {
+	s := m.styles
+	var b strings.Builder
+
+	title := s.AppTitle.Render("ESTADO DETALLADO DEL AGENTE")
+	sub := s.Subtitle.Render("Diagnóstico y plataformas (scroll con flechas o rueda del mouse)")
+	b.WriteString(fmt.Sprintf("%s  %s\n\n", title, sub))
+
+	b.WriteString(m.viewport.View())
+	b.WriteString("\n\n")
+
 	keys := []string{
 		fmt.Sprintf("%s %s", s.Key.Render("[Esc/Q]"), s.Desc.Render("Volver al Dashboard")),
 		fmt.Sprintf("%s %s", s.Key.Render("[R]"), s.Desc.Render("Recargar")),
+		fmt.Sprintf("%s %s", s.Key.Render("[↑/↓/PgUp/PgDn]"), s.Desc.Render("Scroll")),
 	}
 	b.WriteString(s.HelpBar.Render(strings.Join(keys, "  ")))
 
