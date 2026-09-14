@@ -495,7 +495,7 @@ func (m *settingsModel) currentField() *settingsField {
 	return &g.Fields[m.fieldIdx]
 }
 
-func (m *settingsModel) update(msg tea.Msg) (settingsModel, tea.Cmd) {
+func (m *settingsModel) update(msg tea.Msg) (*settingsModel, tea.Cmd) {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		if m.editing {
@@ -566,7 +566,7 @@ func (m *settingsModel) move(delta int) {
 	m.saved = false
 }
 
-func (m *settingsModel) activate() (settingsModel, tea.Cmd) {
+func (m *settingsModel) activate() (*settingsModel, tea.Cmd) {
 	if m.level == settingsLevelGroups {
 		g := m.currentGroup()
 		if g == nil {

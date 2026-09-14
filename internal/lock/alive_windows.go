@@ -6,7 +6,7 @@ package lock
 // (windowsPidAlive). Este archivo existe para dejar explícito que
 // en Windows no se usa señal 0.
 
-func unixPidAlive(pid int) bool {
+func unixPidAlive(_ int) bool {
 	// Nunca se llama en Windows; por seguridad asumir vivo.
 	return true
 }
