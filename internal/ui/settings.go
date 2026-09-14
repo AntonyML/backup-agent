@@ -32,6 +32,7 @@ const (
 	kindChoice
 	kindList
 	kindMulti
+	kindPassword
 )
 
 // settingsField es una fila editable de un grupo de ajustes.
@@ -206,7 +207,11 @@ func (m *settingsModel) groupSummary(idx int) string {
 	case groupSchedule:
 		return fmt.Sprintf("modo: %s a las %s · sync post-backup: %v", m.cfg.Schedule.Mode, m.cfg.Schedule.TimeOfDay, m.cfg.Schedule.SyncAfterBackup)
 	case groupDatabase:
-		return fmt.Sprintf("%s en %s · conserva %d copias", m.cfg.Database, m.cfg.Server, m.cfg.Retain)
+		auth := "Windows Auth"
+		if strings.ToLower(strings.TrimSpace(m.cfg.AuthMode)) == "sql" || strings.TrimSpace(m.cfg.User) != "" {
+			auth = fmt.Sprintf("SQL (%s)", m.cfg.User)
+		}
+		return fmt.Sprintf("%s en %s (%s) · conserva %d copias", m.cfg.Database, m.cfg.Server, auth, m.cfg.Retain)
 	case groupObservability:
 		if !m.cfg.Supabase.Enabled {
 			return "Desactivado"
@@ -410,6 +415,35 @@ func (m *settingsModel) databaseFields() []settingsField {
 				s.BackupTimeoutSec = n
 				return nil
 			},
+		},
+		{
+			Label: "Modo de autenticación", Kind: kindChoice, Options: []string{"windows", "sql"},
+			Help: "windows = Windows Integrated Auth (SSO); sql = Usuario y contraseña.",
+			Get: func(s application.Settings) string {
+				if s.AuthMode == "" {
+					return "windows"
+				}
+				return s.AuthMode
+			},
+			Set: func(s *application.Settings, v string) error { s.AuthMode = strings.ToLower(v); return nil },
+		},
+		{
+			Label: "Usuario SQL (modo sql)", Kind: kindText,
+			Help: "Usuario para autenticación SQL (ej: sa). Dejar vacío si se usa Windows Auth.",
+			Get:  func(s application.Settings) string { return s.User },
+			Set:  func(s *application.Settings, v string) error { s.User = v; return nil },
+		},
+		{
+			Label: "Contraseña SQL (modo sql)", Kind: kindPassword,
+			Help: "Contraseña para autenticación SQL.",
+			Get:  func(s application.Settings) string { return s.Password },
+			Set:  func(s *application.Settings, v string) error { s.Password = v; return nil },
+		},
+		{
+			Label: "Ruta en motor SQL (Docker)", Kind: kindText,
+			Help: "Ruta que ve el motor SQL (ej: /var/opt/mssql/backup). Dejar vacío para usar carpeta local.",
+			Get:  func(s application.Settings) string { return s.SQLBackupDir },
+			Set:  func(s *application.Settings, v string) error { s.SQLBackupDir = v; return nil },
 		},
 	}
 }
@@ -942,6 +976,12 @@ func (m *settingsModel) activate() (*settingsModel, tea.Cmd) {
 		return m, nil
 	default:
 		m.editing = true
+		if f.Kind == kindPassword {
+			m.input.EchoMode = textinput.EchoPassword
+			m.input.EchoCharacter = '•'
+		} else {
+			m.input.EchoMode = textinput.EchoNormal
+		}
 		m.input.SetValue(f.Get(m.cfg))
 		m.input.CursorEnd()
 		return m, m.input.Focus()
@@ -956,6 +996,7 @@ func (m *settingsModel) applyInput() {
 	}
 	cmd := m.setField(f, m.input.Value())
 	m.editing = false
+	m.input.EchoMode = textinput.EchoNormal
 	m.input.Blur()
 	_ = cmd
 }
@@ -1461,6 +1502,9 @@ func (m settingsModel) viewFields(b *strings.Builder) {
 			if v, err := parseBool(value); err == nil {
 				value = boolText(v)
 			}
+		}
+		if f.Kind == kindPassword && value != "" {
+			value = "••••••••"
 		}
 
 		if selected && m.editing {

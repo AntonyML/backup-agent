@@ -36,7 +36,7 @@ func (e *SQLiteSQLEngine) SetSimulateVerifyError(err error) {
 	e.simulateVerifyErr = err
 }
 
-func (e *SQLiteSQLEngine) Open(server string, loginTimeoutSec int) (io.Closer, error) {
+func (e *SQLiteSQLEngine) Open(opts sqlbackup.ConnectOptions) (io.Closer, error) {
 	db, err := sql.Open("sqlite", e.dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("abrir sqlite test: %w", err)

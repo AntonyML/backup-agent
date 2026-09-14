@@ -77,6 +77,15 @@ type Config struct {
 	// BackupTimeoutSec es el timeout máximo del BACKUP DATABASE.
 	// 0 = sin timeout (no recomendado; el Task Scheduler igual puede matar).
 	BackupTimeoutSec int `json:"backup_timeout_sec"`
+	// AuthMode define el modo de autenticación SQL: "windows" (default) o "sql".
+	AuthMode string `json:"auth_mode,omitempty"`
+	// User es el usuario para autenticación SQL (ej: "sa"). Vacío en modo "windows".
+	User string `json:"user,omitempty"`
+	// Password es la contraseña para autenticación SQL. Vacío en modo "windows".
+	Password string `json:"password,omitempty"`
+	// SQLBackupDir es la ruta interna vista por el motor SQL (ej: /var/opt/mssql/backup en Docker).
+	// Si está vacía, se utiliza backup_dir.
+	SQLBackupDir string `json:"sql_backup_dir,omitempty"`
 	// RemoteServer configura el almacenamiento remoto en servidor Windows / UNC (Fase 3).
 	RemoteServer ServerStorageConfig `json:"remote_server,omitempty"`
 	// Supabase configura el registro remoto de eventos (Fase 4).
@@ -206,6 +215,11 @@ func (c Config) Validate() error {
 	if c.BackupTimeoutSec < 0 {
 		return fmt.Errorf("config: backup_timeout_sec no puede ser negativo")
 	}
+	if strings.ToLower(strings.TrimSpace(c.AuthMode)) == "sql" {
+		if strings.TrimSpace(c.User) == "" {
+			return fmt.Errorf("config: user es obligatorio cuando auth_mode es 'sql'")
+		}
+	}
 	if c.RemoteServer.Enabled {
 		if strings.TrimSpace(c.RemoteServer.RemotePath) == "" {
 			return fmt.Errorf("config: remote_server.remote_path es obligatorio cuando enabled es true")
@@ -301,6 +315,15 @@ func contains(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// EffectiveSQLBackupDir devuelve la ruta de destino que recibe el comando BACKUP DATABASE.
+// Si SQLBackupDir está configurado (caso Docker/Linux), se usa esa ruta; de lo contrario, se usa BackupDir.
+func (c Config) EffectiveSQLBackupDir() string {
+	if strings.TrimSpace(c.SQLBackupDir) != "" {
+		return strings.TrimSpace(c.SQLBackupDir)
+	}
+	return c.BackupDir
 }
 
 // Save escribe la configuración completa en path de forma atómica (tmp + rename).

@@ -1,4 +1,4 @@
-﻿package application
+package application
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"femucaribe-backup-agent/internal/config"
 	"femucaribe-backup-agent/internal/events"
 	"femucaribe-backup-agent/internal/lock"
+	"femucaribe-backup-agent/internal/sqlbackup"
 	"femucaribe-backup-agent/internal/state"
 	"femucaribe-backup-agent/internal/storage"
 )
@@ -40,7 +41,7 @@ type mockSQLEngine struct {
 	verifyErr error
 }
 
-func (m *mockSQLEngine) Open(server string, loginTimeoutSec int) (io.Closer, error) {
+func (m *mockSQLEngine) Open(opts sqlbackup.ConnectOptions) (io.Closer, error) {
 	return mockCloser{}, nil
 }
 

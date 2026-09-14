@@ -9,7 +9,7 @@ import (
 )
 
 func TestDSN_WindowsAuth(t *testing.T) {
-	dsn := DSN(`Caproba01\vbadilla`, 15)
+	dsn := DSN(ConnectOptions{Server: `Caproba01\vbadilla`, LoginTimeoutSec: 15})
 	// Debe parsearlo el propio driver (sin conectarse).
 	cfg, err := msdsn.Parse(dsn)
 	if err != nil {
@@ -25,6 +25,32 @@ func TestDSN_WindowsAuth(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(dsn), "password") || strings.Contains(strings.ToLower(dsn), "user id") {
 		t.Errorf("DSN no debe llevar credenciales (Windows Integrated Auth): %s", dsn)
+	}
+}
+
+func TestDSN_SQLAuth(t *testing.T) {
+	dsn := DSN(ConnectOptions{
+		Server:          "localhost,14333",
+		Database:        "SIDC",
+		AuthMode:        "sql",
+		User:            "sa",
+		Password:        "SecretPass123!",
+		LoginTimeoutSec: 10,
+	})
+	cfg, err := msdsn.Parse(dsn)
+	if err != nil {
+		t.Fatalf("el driver debería parsear DSN de SQL auth %q: %v", dsn, err)
+	}
+	if !strings.Contains(cfg.Host, "localhost") {
+		t.Errorf("host parseado = %q, esperaba localhost", cfg.Host)
+	}
+	for _, want := range []string{"user id=sa", "password=SecretPass123!", "database=SIDC", "trustservercertificate=true"} {
+		if !strings.Contains(strings.ToLower(dsn), strings.ToLower(want)) {
+			t.Errorf("DSN debería contener %q: %s", want, dsn)
+		}
+	}
+	if strings.Contains(strings.ToLower(dsn), "trusted connection=yes") {
+		t.Errorf("DSN en modo SQL no debe contener trusted connection: %s", dsn)
 	}
 }
 

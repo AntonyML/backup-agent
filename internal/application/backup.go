@@ -1,4 +1,4 @@
-﻿package application
+package application
 
 import (
 	"context"
@@ -109,14 +109,24 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	}
 
 	stamp := time.Now().Format("20060102_1504")
-	finalPath := filepath.Join(a.cfg.BackupDir, fmt.Sprintf("%s_%s.bak", a.cfg.Database, stamp))
-	tmpPath := finalPath + ".tmp"
+	baseFileName := fmt.Sprintf("%s_%s.bak", a.cfg.Database, stamp)
+	finalPath := filepath.Join(a.cfg.BackupDir, baseFileName)
+	tmpFileName := baseFileName + ".tmp"
+	tmpPath := filepath.Join(a.cfg.BackupDir, tmpFileName)
 
-	// ConexiÃ³n y espacio libre
-	db, err := a.sqlEngine.Open(a.cfg.Server, a.cfg.LoginTimeoutSec)
+	// sqlDestPath es la ruta que recibe el motor SQL Server para BACKUP y RESTORE VERIFYONLY.
+	// Si SQLBackupDir está configurado (ej: /var/opt/mssql/backup en Docker/Linux), se usa esa ruta;
+	// de lo contrario, se usa tmpPath en el sistema de archivos local del host.
+	sqlDestPath := tmpPath
+	if strings.TrimSpace(a.cfg.SQLBackupDir) != "" {
+		sqlDestPath = strings.TrimRight(strings.TrimSpace(a.cfg.SQLBackupDir), "/\\") + "/" + tmpFileName
+	}
+
+	// Conexión y espacio libre
+	db, err := a.sqlEngine.Open(a.sqlConnectOptions())
 	if err != nil {
-		a.logger.Error("conexiÃ³n SQL fallÃ³", "error", err)
-		return fmt.Errorf("conexiÃ³n SQL: %w", err)
+		a.logger.Error("conexión SQL falló", "error", err)
+		return fmt.Errorf("conexión SQL: %w", err)
 	}
 	defer db.Close()
 
@@ -124,10 +134,10 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	needed, err := a.sqlEngine.DatabaseSizeBytes(sizeCtx, db, a.cfg.Database)
 	sizeCancel()
 	if err != nil {
-		a.logger.Error("estimaciÃ³n de tamaÃ±o fallÃ³", "error", err)
-		return fmt.Errorf("estimaciÃ³n de tamaÃ±o: %w", err)
+		a.logger.Error("estimación de tamaño falló", "error", err)
+		return fmt.Errorf("estimación de tamaño: %w", err)
 	}
-	a.logger.Info("tamaÃ±o estimado de BD", "db", a.cfg.Database, "bytes", needed)
+	a.logger.Info("tamaño estimado de BD", "db", a.cfg.Database, "bytes", needed)
 
 	if err := a.sqlEngine.EnsureFreeSpace(a.cfg.BackupDir, needed); err != nil {
 		a.logger.Error("espacio insuficiente en disco", "error", err)
@@ -143,7 +153,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	}
 	defer bakCancel()
 
-	a.logger.Info("ejecutando BACKUP DATABASE", "db", a.cfg.Database, "destino", tmpPath)
+	a.logger.Info("ejecutando BACKUP DATABASE", "db", a.cfg.Database, "destino_host", tmpPath, "destino_sql", sqlDestPath)
 	a.recordEvent(ctx, events.Event{
 		EventID:      events.GenerateID(),
 		Timestamp:    time.Now().UTC(),
@@ -153,7 +163,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		AgentVersion: version.Current,
 	})
 
-	if err := a.sqlEngine.BackupDatabase(bakCtx, db, a.cfg.Database, tmpPath); err != nil {
+	if err := a.sqlEngine.BackupDatabase(bakCtx, db, a.cfg.Database, sqlDestPath); err != nil {
 		_ = os.Remove(tmpPath)
 		a.recordEvent(ctx, events.Event{
 			EventID:      events.GenerateID(),
@@ -169,13 +179,13 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 
 	if a.failpoint != nil {
 		if err := a.failpoint("after_backup_started"); err != nil {
-			// Simula corte abrupto/kill dejando .tmp huÃ©rfano en disco
+			// Simula corte abrupto/kill dejando .tmp huérfano en disco
 			return fmt.Errorf("failpoint after_backup_started: %w", err)
 		}
 	}
 
-	a.logger.Info("ejecutando RESTORE VERIFYONLY", "archivo", tmpPath)
-	if err := a.sqlEngine.VerifyBackup(bakCtx, db, tmpPath); err != nil {
+	a.logger.Info("ejecutando RESTORE VERIFYONLY", "archivo_sql", sqlDestPath)
+	if err := a.sqlEngine.VerifyBackup(bakCtx, db, sqlDestPath); err != nil {
 		_ = os.Remove(tmpPath)
 		a.recordEvent(ctx, events.Event{
 			EventID:      events.GenerateID(),

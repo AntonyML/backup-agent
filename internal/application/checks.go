@@ -23,12 +23,16 @@ func (a *App) CheckPlatforms(ctx context.Context) []PlatformCheck {
 	var checks []PlatformCheck
 
 	// 1. SQL Server
-	db, err := a.sqlEngine.Open(a.cfg.Server, a.cfg.LoginTimeoutSec)
+	db, err := a.sqlEngine.Open(a.sqlConnectOptions())
 	if err != nil {
 		checks = append(checks, PlatformCheck{Name: "SQL Server", OK: false, Detail: err.Error()})
 	} else {
 		_ = db.Close()
-		checks = append(checks, PlatformCheck{Name: "SQL Server", OK: true, Detail: fmt.Sprintf("conexión OK a %s", a.cfg.Server)})
+		authDesc := "Windows Auth"
+		if strings.ToLower(strings.TrimSpace(a.cfg.AuthMode)) == "sql" || strings.TrimSpace(a.cfg.User) != "" {
+			authDesc = fmt.Sprintf("SQL Auth (%s)", a.cfg.User)
+		}
+		checks = append(checks, PlatformCheck{Name: "SQL Server", OK: true, Detail: fmt.Sprintf("conexión OK a %s (%s, BD: %s)", a.cfg.Server, authDesc, a.cfg.Database)})
 	}
 
 	// 2. Carpeta local de backups

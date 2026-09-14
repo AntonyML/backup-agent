@@ -19,7 +19,7 @@ import (
 
 // SQLEngine desacopla las operaciones de SQL Server para permitir pruebas unitarias sin base de datos real.
 type SQLEngine interface {
-	Open(server string, loginTimeoutSec int) (io.Closer, error)
+	Open(opts sqlbackup.ConnectOptions) (io.Closer, error)
 	DatabaseSizeBytes(ctx context.Context, db io.Closer, database string) (int64, error)
 	EnsureFreeSpace(dir string, neededBytes int64) error
 	BackupDatabase(ctx context.Context, db io.Closer, database, targetPath string) error
@@ -28,8 +28,8 @@ type SQLEngine interface {
 
 type defaultSQLEngine struct{}
 
-func (e defaultSQLEngine) Open(server string, loginTimeoutSec int) (io.Closer, error) {
-	return sqlbackup.Open(server, loginTimeoutSec)
+func (e defaultSQLEngine) Open(opts sqlbackup.ConnectOptions) (io.Closer, error) {
+	return sqlbackup.Open(opts)
 }
 
 func (e defaultSQLEngine) DatabaseSizeBytes(ctx context.Context, db io.Closer, database string) (int64, error) {
@@ -240,6 +240,18 @@ func (a *App) cloudflareKeep() int {
 		return orInt(o.Keep, a.cfg.Cloudflare.Keep)
 	}
 	return a.cfg.Cloudflare.Keep
+}
+
+// sqlConnectOptions construye los parámetros de conexión resueltos para SQL Server.
+func (a *App) sqlConnectOptions() sqlbackup.ConnectOptions {
+	return sqlbackup.ConnectOptions{
+		Server:          a.cfg.Server,
+		Database:        a.cfg.Database,
+		AuthMode:        a.cfg.AuthMode,
+		User:            a.cfg.User,
+		Password:        a.cfg.Password,
+		LoginTimeoutSec: a.cfg.LoginTimeoutSec,
+	}
 }
 
 // cloudflareTimeoutSec devuelve el timeout configurado para subidas a R2

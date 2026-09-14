@@ -45,29 +45,50 @@ func QuoteStringLiteral(s string) string {
 	return "N'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// DSN arma el connection string ADO con Windows Integrated Auth
-// (sin usuario/contraseña: en Windows el driver usa Single-Sign-On).
-// Nos conectamos a master, no a la base objetivo, para no bloquearla.
-func DSN(server string, loginTimeoutSec int) string {
+// ConnectOptions parametriza la conexión hacia SQL Server.
+type ConnectOptions struct {
+	Server          string
+	Database        string
+	AuthMode        string // "windows" (default) o "sql"
+	User            string
+	Password        string
+	LoginTimeoutSec int
+}
+
+// DSN arma el connection string ADO con Windows Integrated Auth o SQL Server Auth.
+// Si AuthMode es "sql" (o hay User), usa user id/password con cifrado relajado para Docker.
+// De lo contrario (default "windows"), usa trusted connection=yes (Single-Sign-On).
+func DSN(opts ConnectOptions) string {
+	loginTimeoutSec := opts.LoginTimeoutSec
 	if loginTimeoutSec < 0 {
 		loginTimeoutSec = 0
 	}
-	return fmt.Sprintf("server=%s;database=master;trusted connection=yes;app name=%s;connection timeout=%d;dial timeout=%d",
-		server, appName, loginTimeoutSec, loginTimeoutSec)
+	dbName := "master"
+	if strings.TrimSpace(opts.Database) != "" {
+		dbName = opts.Database
+	}
+
+	if strings.ToLower(strings.TrimSpace(opts.AuthMode)) == "sql" || strings.TrimSpace(opts.User) != "" {
+		return fmt.Sprintf("server=%s;database=%s;user id=%s;password=%s;encrypt=disable;trustservercertificate=true;app name=%s;connection timeout=%d;dial timeout=%d",
+			opts.Server, dbName, opts.User, opts.Password, appName, loginTimeoutSec, loginTimeoutSec)
+	}
+
+	return fmt.Sprintf("server=%s;database=%s;trusted connection=yes;app name=%s;connection timeout=%d;dial timeout=%d",
+		opts.Server, dbName, appName, loginTimeoutSec, loginTimeoutSec)
 }
 
 // Open abre el pool y verifica conectividad con un Ping con timeout.
 // Falla rápido si SQL Server está detenido o la instancia es inaccesible.
-func Open(server string, loginTimeoutSec int) (*sql.DB, error) {
-	if strings.TrimSpace(server) == "" {
+func Open(opts ConnectOptions) (*sql.DB, error) {
+	if strings.TrimSpace(opts.Server) == "" {
 		return nil, fmt.Errorf("sqlbackup: server vacío")
 	}
-	db, err := sql.Open(DriverName, DSN(server, loginTimeoutSec))
+	db, err := sql.Open(DriverName, DSN(opts))
 	if err != nil {
-		return nil, fmt.Errorf("sqlbackup: abrir conexión a %s: %w", server, err)
+		return nil, fmt.Errorf("sqlbackup: abrir conexión a %s: %w", opts.Server, err)
 	}
 	db.SetMaxOpenConns(1)
-	timeout := time.Duration(loginTimeoutSec) * time.Second
+	timeout := time.Duration(opts.LoginTimeoutSec) * time.Second
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
@@ -75,7 +96,7 @@ func Open(server string, loginTimeoutSec int) (*sql.DB, error) {
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("sqlbackup: SQL Server %q inaccesible (¿detenido o instancia incorrecta?): %w", server, err)
+		return nil, fmt.Errorf("sqlbackup: SQL Server %q inaccesible (¿detenido o instancia incorrecta?): %w", opts.Server, err)
 	}
 	return db, nil
 }
