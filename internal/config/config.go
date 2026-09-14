@@ -84,12 +84,18 @@ type Config struct {
 	// Cloudflare configura el destino Cloudflare R2 (rotación en la nube).
 	Cloudflare CloudflareConfig `json:"cloudflare,omitempty"`
 	// Schedule configura día, hora y cantidad de corridas de las tareas.
+	// Actúa como schedule GLOBAL/default: los perfiles sin schedule propio lo heredan (D1).
 	Schedule ScheduleConfig `json:"schedule,omitempty"`
+	// Profiles son los perfiles de backup (D10). Vacío = config legacy;
+	// EnsureMigrated la convierte al perfil inicial "full".
+	Profiles []Profile `json:"profiles,omitempty"`
+	// ActiveProfile es el nombre del perfil activo (usado sin --profile).
+	ActiveProfile string `json:"active_profile,omitempty"`
 }
 
 // Default devuelve la configuración de producción FEMUCARIBE.
 func Default() Config {
-	return Config{
+	def := Config{
 		BackupDir:        `C:\Backups\`,
 		Server:           `Caproba01\vbadilla`,
 		Database:         "CONTABILIDAD",
@@ -109,7 +115,7 @@ func Default() Config {
 		},
 		Cloudflare: CloudflareConfig{
 			Enabled:       false,
-			Keep:          10,
+			Keep:          1, // D5: coincide con la conducta productiva previa (rotación R2 conservaba 1 copia)
 			TimeoutSec:    600,
 			UploadRetries: 3,
 		},
@@ -124,6 +130,9 @@ func Default() Config {
 			SyncAfterBackup: true,
 		},
 	}
+	// El default ya viene migrado: perfil inicial "full" (D11) que hereda el schedule global.
+	cfg, _ := def.EnsureMigrated()
+	return cfg
 }
 
 var dbNameRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
@@ -168,6 +177,9 @@ func Load(path string) (Config, error) {
 	if err := json.Unmarshal(merged, &cfg); err != nil {
 		return Config{}, fmt.Errorf("config: %s inválido: %w", path, err)
 	}
+	// Migración automática e idempotente legacy -> perfiles (D11). Una config
+	// vieja carga sin error y se re-escribe en formato nuevo al primer Save.
+	cfg, _ = cfg.EnsureMigrated()
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -228,6 +240,9 @@ func (c Config) Validate() error {
 		}
 	}
 	if err := c.Schedule.Validate(); err != nil {
+		return err
+	}
+	if err := c.ValidateProfiles(); err != nil {
 		return err
 	}
 	return nil
@@ -291,6 +306,9 @@ func contains(list []string, want string) bool {
 // Save escribe la configuración completa en path de forma atómica (tmp + rename).
 // Valida antes de tocar disco: nunca deja un config.json inconsistente.
 func Save(path string, c Config) error {
+	// Nunca se persiste una config sin migrar: el formato en disco es siempre
+	// el nuevo (con perfiles). Idempotente si ya estaba migrada.
+	c, _ = c.EnsureMigrated()
 	if err := c.Validate(); err != nil {
 		return err
 	}

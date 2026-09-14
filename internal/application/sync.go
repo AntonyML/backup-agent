@@ -1,4 +1,4 @@
-package application
+﻿package application
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"femucaribe-backup-agent/internal/config"
 	"femucaribe-backup-agent/internal/events"
 	"femucaribe-backup-agent/internal/lock"
 	"femucaribe-backup-agent/internal/state"
@@ -34,6 +35,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 	if err != nil {
 		return fmt.Errorf("cargar estado: %w", err)
 	}
+	pst := a.profileState(st)
 
 	// Reintentar eventos pendientes hacia Supabase si los hay
 	hadPendingEvents := len(st.PendingEvents) > 0
@@ -41,8 +43,8 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 		a.flushPendingEvents(ctx, st)
 	}
 
-	hasPending := st.PendingSync.R2 || st.PendingSync.Server
-	if (!hasPending && !opts.Force) || st.LastBackupFile == "" {
+	hasPending := pst.HasPending()
+	if (!hasPending && !opts.Force) || pst.LastBackupFile == "" {
 		if !hadPendingEvents {
 			a.logger.Info("no hay sincronizaciones pendientes")
 			return ErrNoPendingBackup
@@ -51,38 +53,38 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 		return nil
 	}
 
-	if _, err := os.Stat(st.LastBackupFile); err != nil {
-		a.logger.Warn("el archivo pendiente no existe en disco, descartando pendientes", "archivo", st.LastBackupFile)
-		st.SetPendingR2(false)
-		st.SetPendingServer(false)
+	if _, err := os.Stat(pst.LastBackupFile); err != nil {
+		a.logger.Warn("el archivo pendiente no existe en disco, descartando pendientes", "archivo", pst.LastBackupFile)
+		pst.SetPending(config.PlatformCloudflare, false)
+		pst.SetPending(config.PlatformServer, false)
 		_ = state.Save(a.statePath, st)
-		return fmt.Errorf("archivo pendiente no encontrado en disco: %s", st.LastBackupFile)
+		return fmt.Errorf("archivo pendiente no encontrado en disco: %s", pst.LastBackupFile)
 	}
 
-	a.logger.Info("sincronizando archivo a backends remotos", "archivo", st.LastBackupFile)
+	a.logger.Info("sincronizando archivo a backends remotos", "archivo", pst.LastBackupFile, "perfil", a.profileName)
 	var hadError bool
 	for _, b := range a.backends {
 		isR2 := strings.EqualFold(b.Name(), "r2")
 		isServer := strings.EqualFold(b.Name(), "server")
 
 		if !opts.Force {
-			if (isR2 && !st.PendingSync.R2) || (isServer && !st.PendingSync.Server) {
+			if (isR2 && !pst.IsPending(config.PlatformCloudflare)) || (isServer && !pst.IsPending(config.PlatformServer)) {
 				continue
 			}
 		}
 
-		syncCtx, syncCancel := context.WithTimeout(ctx, 10*time.Minute)
-		err := b.Upload(syncCtx, st.LastBackupFile)
+		syncCtx, syncCancel := context.WithTimeout(ctx, a.backendTimeout(b))
+		err := a.uploadWithRetries(syncCtx, b, pst.LastBackupFile)
 		syncCancel()
 		if err != nil {
 			hadError = true
-			a.logger.Error("falló sincronización a backend", "backend", b.Name(), "error", err)
+			a.logger.Error("fallÃ³ sincronizaciÃ³n a backend", "backend", b.Name(), "error", err)
 			failType := events.TypeR2SyncFailed
 			if isServer {
 				failType = events.TypeServerSyncFailed
-				st.SetPendingServer(true)
+				pst.SetPending(config.PlatformServer, true)
 			} else if isR2 {
-				st.SetPendingR2(true)
+				pst.SetPending(config.PlatformCloudflare, true)
 			}
 			a.recordEvent(ctx, events.Event{
 				EventID:      events.GenerateID(),
@@ -90,20 +92,20 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 				EventType:    failType,
 				Status:       events.StatusFailed,
 				Backend:      b.Name(),
-				FileName:     filepath.Base(st.LastBackupFile),
+				FileName:     filepath.Base(pst.LastBackupFile),
 				ErrorMessage: sanitizeError(err),
 				AgentVersion: version.Current,
 			})
 		} else {
-			a.logger.Info("sincronización exitosa", "backend", b.Name())
+			a.logger.Info("sincronizaciÃ³n exitosa", "backend", b.Name())
 			completedType := events.TypeR2SyncCompleted
 			if isServer {
 				completedType = events.TypeServerSyncCompleted
-				st.MarkServerSynced(filepath.Base(st.LastBackupFile))
-				_ = b.Rotate(ctx, 10)
+				pst.MarkSynced(config.PlatformServer, filepath.Base(pst.LastBackupFile))
+				_ = b.Rotate(ctx, a.serverKeep())
 			} else if isR2 {
-				st.MarkR2Synced(filepath.Base(st.LastBackupFile))
-				_ = b.Rotate(ctx, 1)
+				pst.MarkSynced(config.PlatformCloudflare, filepath.Base(pst.LastBackupFile))
+				_ = b.Rotate(ctx, a.cloudflareKeep())
 			} else {
 				_ = b.Rotate(ctx, 0)
 			}
@@ -113,7 +115,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 				EventType:    completedType,
 				Status:       events.StatusSuccess,
 				Backend:      b.Name(),
-				FileName:     filepath.Base(st.LastBackupFile),
+				FileName:     filepath.Base(pst.LastBackupFile),
 				AgentVersion: version.Current,
 			})
 		}
@@ -126,3 +128,4 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 
 	return nil
 }
+

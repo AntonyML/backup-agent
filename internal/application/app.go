@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"femucaribe-backup-agent/internal/config"
@@ -75,6 +76,7 @@ type App struct {
 	secretsPath  string
 	lockPath     string
 	logDir       string
+	profileName  string
 	backends     []storage.Backend
 	localBackend storage.Backend
 	eventRepo    events.EventRepository
@@ -90,6 +92,9 @@ type Options struct {
 	SecretsPath  string
 	LockPath     string
 	LogDir       string
+	// Profile es el nombre del perfil con el que opera esta instancia de App.
+	// Vacío = perfil activo de la config.
+	Profile      string
 	Backends     []storage.Backend
 	LocalBackend storage.Backend
 	EventRepo    events.EventRepository
@@ -117,20 +122,183 @@ func New(opts Options) *App {
 			return nil
 		}
 	}
+	profile := opts.Profile
+	if profile == "" {
+		profile = opts.Config.ActiveProfile
+	}
+	if profile == "" {
+		profile = config.InitialProfileName
+	}
+	cfg := opts.Config
+	// D9: un Schedule zero-value (config construida por código, p.ej. en tests)
+	// mantiene la conducta histórica: sync tras backup activo. Las configs
+	// cargadas de archivo ya heredan true desde Default().
+	if isZeroSchedule(cfg.Schedule) {
+		cfg.Schedule.SyncAfterBackup = true
+	}
+	backends := filterBackendsForProfile(cfg, profile, opts.Backends)
 	return &App{
-		cfg:          opts.Config,
+		cfg:          cfg,
 		configPath:   opts.ConfigPath,
 		statePath:    opts.StatePath,
 		secretsPath:  opts.SecretsPath,
 		lockPath:     opts.LockPath,
 		logDir:       opts.LogDir,
-		backends:     opts.Backends,
+		profileName:  profile,
+		backends:     backends,
 		localBackend: opts.LocalBackend,
 		eventRepo:    opts.EventRepo,
 		sqlEngine:    engine,
 		failpoint:    fp,
 		logger:       log,
 	}
+}
+
+// filterBackendsForProfile construye SOLO los backends del perfil activo
+// (Etapa 3): local es implícito (localBackend, no se filtra), R2 y server se
+// conservan solo si el perfil los lista. storage.Backend no conoce perfiles;
+// los nombres de backend se mapean a plataformas acá, en application.
+// Si el perfil no existe en la config (config construida a mano en tests),
+// se conservan todos para no romper flujos legacy; la CLI valida aparte.
+func filterBackendsForProfile(cfg config.Config, profile string, backends []storage.Backend) []storage.Backend {
+	p, ok := cfg.ProfileByName(profile)
+	if !ok {
+		return backends
+	}
+	wanted := map[string]bool{}
+	for _, plat := range p.Platforms {
+		wanted[plat] = true
+	}
+	out := make([]storage.Backend, 0, len(backends))
+	for _, b := range backends {
+		switch {
+		case strings.EqualFold(b.Name(), "r2"):
+			if wanted[config.PlatformCloudflare] {
+				out = append(out, b)
+			}
+		case strings.EqualFold(b.Name(), "server"):
+			if wanted[config.PlatformServer] {
+				out = append(out, b)
+			}
+		default:
+			// Backend futuro/desconocido: se conserva por compatibilidad.
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// ProfileName devuelve el nombre del perfil con el que opera esta App.
+func (a *App) ProfileName() string { return a.profileName }
+
+// profileState extrae la sección de estado del perfil activo.
+func (a *App) profileState(st *state.State) *state.ProfileState {
+	return st.Profile(a.profileName)
+}
+
+// activeProfile devuelve el perfil activo (puede ser vacío si la config es legacy).
+func (a *App) activeProfile() config.Profile {
+	p, ok := a.cfg.ProfileByName(a.profileName)
+	if !ok {
+		return config.Profile{Name: a.profileName}
+	}
+	return p
+}
+
+// profileCloudflareOverride devuelve el override R2 del perfil activo, si lo hay.
+func (a *App) profileCloudflareOverride() *config.PlatformCloudflareOverride {
+	o := a.activeProfile().Overrides.Cloudflare
+	return o
+}
+
+// profileServerOverride devuelve el override UNC del perfil activo, si lo hay.
+func (a *App) profileServerOverride() *config.PlatformServerOverride {
+	return a.activeProfile().Overrides.RemoteServer
+}
+
+func orInt(v *int, def int) int {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
+// syncAfterBackup resuelve el flag desde el schedule efectivo del perfil (D9,
+// D1): propio o heredado del global.
+func (a *App) syncAfterBackup() bool {
+	s := a.cfg.EffectiveSchedule(a.activeProfile())
+	if !s.SyncAfterBackup && isZeroSchedule(s) {
+		// Schedule vacío sin flag = conducta histórica (subir tras backup).
+		return true
+	}
+	return s.SyncAfterBackup
+}
+
+// cloudflareKeep resuelve el keep R2: override del perfil, si no el global (D5).
+func (a *App) cloudflareKeep() int {
+	if o := a.profileCloudflareOverride(); o != nil {
+		return orInt(o.Keep, a.cfg.Cloudflare.Keep)
+	}
+	return a.cfg.Cloudflare.Keep
+}
+
+// cloudflareTimeoutSec devuelve el timeout configurado para subidas a R2
+// (reparación D5: antes era un literal de 10 minutos).
+func (a *App) cloudflareTimeoutSec() int {
+	if o := a.profileCloudflareOverride(); o != nil {
+		return orInt(o.TimeoutSec, a.cfg.Cloudflare.TimeoutSec)
+	}
+	if a.cfg.Cloudflare.TimeoutSec > 0 {
+		return a.cfg.Cloudflare.TimeoutSec
+	}
+	return 600
+}
+
+// cloudflareRetries resuelve los reintentos de subida a R2 (D5).
+func (a *App) cloudflareRetries() int {
+	if o := a.profileCloudflareOverride(); o != nil {
+		return orInt(o.UploadRetries, a.cfg.Cloudflare.UploadRetries)
+	}
+	return a.cfg.Cloudflare.UploadRetries
+}
+
+// serverKeep resuelve el keep UNC: override del perfil, si no el global (D5).
+func (a *App) serverKeep() int {
+	if o := a.profileServerOverride(); o != nil {
+		return orInt(o.Keep, a.cfg.RemoteServer.Keep)
+	}
+	return a.cfg.RemoteServer.Keep
+}
+
+// serverTimeoutSec devuelve el timeout configurado para copias al servidor UNC.
+func (a *App) serverTimeoutSec() int {
+	if o := a.profileServerOverride(); o != nil {
+		return orInt(o.TimeoutSec, a.cfg.RemoteServer.TimeoutSec)
+	}
+	if a.cfg.RemoteServer.TimeoutSec > 0 {
+		return a.cfg.RemoteServer.TimeoutSec
+	}
+	return 300
+}
+
+// backendTimeout devuelve el timeout de subida para un backend según plataforma.
+func (a *App) backendTimeout(b storage.Backend) time.Duration {
+	if strings.EqualFold(b.Name(), "server") {
+		return time.Duration(a.serverTimeoutSec()) * time.Second
+	}
+	return time.Duration(a.cloudflareTimeoutSec()) * time.Second
+}
+
+// RemoteSyncTimeout devuelve el timeout configurado para operaciones remotas
+// (reparación D5: antes la TUI usaba un literal de 10 minutos).
+func (a *App) RemoteSyncTimeout() time.Duration {
+	return time.Duration(a.cloudflareTimeoutSec()) * time.Second
+}
+
+// isZeroSchedule reporta si el schedule no tiene ningún campo configurado.
+func isZeroSchedule(s config.ScheduleConfig) bool {
+	return !s.Enabled && s.Mode == "" && s.TimeOfDay == "" && len(s.Weekdays) == 0 &&
+		s.IntervalMinutes == 0 && s.MaxDurationMin == 0 && s.TaskName == "" && !s.SyncAfterBackup
 }
 
 // recordEvent registra un evento operativo en Supabase de forma segura y no bloqueante.

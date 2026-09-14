@@ -10,6 +10,19 @@ import (
 // Es un alias de config.Config: la UI nunca importa el paquete config
 // directamente (regla de Clean Architecture, igual que storage y state).
 type Settings = config.Config
+type Profile = config.Profile
+type ProfileOverrides = config.ProfileOverrides
+type ScheduleConfig = config.ScheduleConfig
+
+const (
+	KindLocal          = config.KindLocal
+	KindDev            = config.KindDev
+	KindHibrido        = config.KindHibrido
+	KindFull           = config.KindFull
+	PlatformCloudflare = config.PlatformCloudflare
+	PlatformServer     = config.PlatformServer
+	PlatformLocal      = config.PlatformLocal
+)
 
 // GetSettings devuelve una copia de la configuración activa.
 func (a *App) GetSettings() Settings {

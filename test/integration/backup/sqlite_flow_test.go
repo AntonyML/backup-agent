@@ -1,4 +1,4 @@
-package backup_test
+﻿package backup_test
 
 import (
 	"context"
@@ -26,7 +26,7 @@ func TestSQLite_EndToEndBackupFlow(t *testing.T) {
 	backupDir := filepath.Join(tempDir, "backups")
 	dbPath := filepath.Join(tempDir, "source.sqlite")
 
-	// 1. Validar seguridad anti-producción
+	// 1. Validar seguridad anti-producciÃ³n
 	safetyErr := testenv.ValidateSafety(testenv.TestEnvironmentConfig{
 		DatabaseDriver: "sqlite",
 		DatabaseName:   "test_contabilidad",
@@ -35,13 +35,13 @@ func TestSQLite_EndToEndBackupFlow(t *testing.T) {
 		TestMode:       true,
 	})
 	if safetyErr != nil {
-		t.Fatalf("violación de seguridad en test: %v", safetyErr)
+		t.Fatalf("violaciÃ³n de seguridad en test: %v", safetyErr)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// 2. Crear base origen SQLite y aplicar seed determinístico
+	// 2. Crear base origen SQLite y aplicar seed determinÃ­stico
 	sourceDB, err := testdb.NewSQLiteFile(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("error creando base SQLite de prueba: %v", err)
@@ -89,7 +89,7 @@ func TestSQLite_EndToEndBackupFlow(t *testing.T) {
 
 	tmpFiles, err := filepath.Glob(filepath.Join(backupDir, "*.tmp"))
 	if err != nil || len(tmpFiles) != 0 {
-		t.Fatalf("no deberían quedar archivos temporales .tmp huérfanos, encontrados: %v", tmpFiles)
+		t.Fatalf("no deberÃ­an quedar archivos temporales .tmp huÃ©rfanos, encontrados: %v", tmpFiles)
 	}
 
 	// 6. Verificar state.json y coincidencia estricta de SHA-256
@@ -98,22 +98,22 @@ func TestSQLite_EndToEndBackupFlow(t *testing.T) {
 		t.Fatalf("error cargando state.json: %v", err)
 	}
 
-	if st.LastRunDate != state.Today() {
-		t.Errorf("LastRunDate inválido: esperada=%s, obtenida=%s", state.Today(), st.LastRunDate)
+	if st.Profile(config.InitialProfileName).LastRunDate != state.Today() {
+		t.Errorf("LastRunDate invÃ¡lido: esperada=%s, obtenida=%s", state.Today(), st.Profile(config.InitialProfileName).LastRunDate)
 	}
-	if filepath.Clean(st.LastBackupFile) != filepath.Clean(finalBackupFile) {
-		t.Errorf("LastBackupFile inválido: esperado=%s, obtenido=%s", finalBackupFile, st.LastBackupFile)
+	if filepath.Clean(st.Profile(config.InitialProfileName).LastBackupFile) != filepath.Clean(finalBackupFile) {
+		t.Errorf("LastBackupFile invÃ¡lido: esperado=%s, obtenido=%s", finalBackupFile, st.Profile(config.InitialProfileName).LastBackupFile)
 	}
 
 	computedSHA, err := hasher.File(finalBackupFile)
 	if err != nil {
 		t.Fatalf("error calculando hash del .bak: %v", err)
 	}
-	if st.SHA256 != computedSHA {
-		t.Errorf("SHA-256 no coincide: en state.json=%s, calculado=%s", st.SHA256, computedSHA)
+	if st.Profile(config.InitialProfileName).SHA256 != computedSHA {
+		t.Errorf("SHA-256 no coincide: en state.json=%s, calculado=%s", st.Profile(config.InitialProfileName).SHA256, computedSHA)
 	}
 
-	// 7. Simular restauración: abrir el .bak como base SQLite y validar equivalencia total
+	// 7. Simular restauraciÃ³n: abrir el .bak como base SQLite y validar equivalencia total
 	func() {
 		restoredDB, err := sql.Open("sqlite", finalBackupFile)
 		if err != nil {
@@ -151,10 +151,10 @@ func TestSQLite_TmpOrphanCleanupOnStartup(t *testing.T) {
 		t.Fatalf("crear backupDir: %v", err)
 	}
 
-	// Crear archivo huérfano .tmp simulando caída previa
+	// Crear archivo huÃ©rfano .tmp simulando caÃ­da previa
 	orphanFile := filepath.Join(backupDir, "interrupted_run.bak.tmp")
 	if err := os.WriteFile(orphanFile, []byte("datos incompletos"), 0o644); err != nil {
-		t.Fatalf("crear huérfano: %v", err)
+		t.Fatalf("crear huÃ©rfano: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -183,11 +183,12 @@ func TestSQLite_TmpOrphanCleanupOnStartup(t *testing.T) {
 	})
 
 	if err := app.Backup(ctx, application.BackupOptions{}); err != nil {
-		t.Fatalf("app.Backup falló: %v", err)
+		t.Fatalf("app.Backup fallÃ³: %v", err)
 	}
 
-	// El huérfano debe haber sido eliminado
+	// El huÃ©rfano debe haber sido eliminado
 	if _, err := os.Stat(orphanFile); !os.IsNotExist(err) {
-		t.Errorf("se esperaba que el archivo huérfano %s fuera eliminado en el arranque", orphanFile)
+		t.Errorf("se esperaba que el archivo huÃ©rfano %s fuera eliminado en el arranque", orphanFile)
 	}
 }
+

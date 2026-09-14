@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"femucaribe-backup-agent/internal/config"
 	"femucaribe-backup-agent/internal/secrets"
 	"femucaribe-backup-agent/internal/state"
 )
@@ -42,21 +43,22 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 	if err != nil {
 		st = &state.State{}
 	}
+	pst := a.profileState(st)
 
 	backupStatus := BackupStatus{
 		Result: "never_run",
 	}
 
-	if st.LastRunDate != "" {
-		backupStatus.Filename = filepath.Base(st.LastBackupFile)
-		backupStatus.SHA256 = st.SHA256
-		if fi, err := os.Stat(st.LastBackupFile); err == nil {
+	if pst.LastRunDate != "" {
+		backupStatus.Filename = filepath.Base(pst.LastBackupFile)
+		backupStatus.SHA256 = pst.SHA256
+		if fi, err := os.Stat(pst.LastBackupFile); err == nil {
 			backupStatus.LastRun = fi.ModTime()
-		} else if parsed, err := time.Parse("2006-01-02", st.LastRunDate); err == nil {
+		} else if parsed, err := time.Parse("2006-01-02", pst.LastRunDate); err == nil {
 			backupStatus.LastRun = parsed
 		}
 
-		if st.PendingSync.R2 || st.PendingSync.Server {
+		if pst.HasPending() {
 			backupStatus.Result = "pending_sync"
 		} else {
 			backupStatus.Result = "success"
@@ -67,12 +69,12 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 	var backendStatuses []BackendStatus
 
 	// 1. Local
-	localOK := st.LastBackupFile != ""
-	if _, err := os.Stat(st.LastBackupFile); err != nil && st.LastBackupFile != "" {
+	localOK := pst.LastBackupFile != ""
+	if _, err := os.Stat(pst.LastBackupFile); err != nil && pst.LastBackupFile != "" {
 		localOK = false
 	}
 	localText := "OK"
-	if !localOK && st.LastRunDate != "" {
+	if !localOK && pst.LastRunDate != "" {
 		localText = "ERROR"
 	}
 	backendStatuses = append(backendStatuses, BackendStatus{
@@ -91,12 +93,11 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 			break
 		}
 	}
+	r2LastSynced := pst.LastSyncedFiles[config.PlatformCloudflare]
 	r2StatusText := "Not configured"
 	if r2Configured {
-		if st.PendingSync.R2 {
+		if pst.IsPending(config.PlatformCloudflare) {
 			r2StatusText = "PENDING"
-		} else if st.R2LastSyncedFile != "" {
-			r2StatusText = "OK"
 		} else {
 			r2StatusText = "OK"
 		}
@@ -104,8 +105,8 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 	backendStatuses = append(backendStatuses, BackendStatus{
 		Name:        "R2",
 		Configured:  r2Configured,
-		LastSyncOK:  r2Configured && !st.PendingSync.R2 && st.R2LastSyncedFile != "",
-		PendingSync: st.PendingSync.R2,
+		LastSyncOK:  r2Configured && !pst.IsPending(config.PlatformCloudflare) && r2LastSynced != "",
+		PendingSync: pst.IsPending(config.PlatformCloudflare),
 		StatusText:  r2StatusText,
 	})
 
@@ -117,12 +118,11 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 			break
 		}
 	}
+	serverLastSynced := pst.LastSyncedFiles[config.PlatformServer]
 	serverStatusText := "Not configured"
 	if serverConfigured {
-		if st.PendingSync.Server {
+		if pst.IsPending(config.PlatformServer) {
 			serverStatusText = "PENDING"
-		} else if st.ServerLastSyncedFile != "" {
-			serverStatusText = "OK"
 		} else {
 			serverStatusText = "OK"
 		}
@@ -130,8 +130,8 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 	backendStatuses = append(backendStatuses, BackendStatus{
 		Name:        "Server",
 		Configured:  serverConfigured,
-		LastSyncOK:  serverConfigured && !st.PendingSync.Server && st.ServerLastSyncedFile != "",
-		PendingSync: st.PendingSync.Server,
+		LastSyncOK:  serverConfigured && !pst.IsPending(config.PlatformServer) && serverLastSynced != "",
+		PendingSync: pst.IsPending(config.PlatformServer),
 		StatusText:  serverStatusText,
 	})
 

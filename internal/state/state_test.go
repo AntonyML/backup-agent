@@ -1,4 +1,4 @@
-package state
+﻿package state
 
 import (
 	"os"
@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"femucaribe-backup-agent/internal/config"
 	"femucaribe-backup-agent/internal/events"
 )
 
@@ -17,17 +18,21 @@ func TestLoad_MissingFile_ReturnsEmptyWithoutError(t *testing.T) {
 	if s == nil {
 		t.Fatal("Load debería devolver State no-nil")
 	}
-	if s.LastRunDate != "" || s.LastBackupFile != "" || s.SHA256 != "" {
-		t.Errorf("Load inexistente debería devolver State vacío, dio %+v", s)
+	if p, ok := s.ProfileIfExists(config.InitialProfileName); ok && (p.LastRunDate != "" || p.LastBackupFile != "") {
+		t.Errorf("Load inexistente debería devolver State vacío, dio %+v", p)
 	}
 }
 
 func TestSaveLoad_RoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	want := &State{
-		LastRunDate:    "2026-01-15",
-		LastBackupFile: `C:\Backups\CONTABILIDAD_20260115_1200.bak`,
-		SHA256:         "abc123",
+		Profiles: map[string]*ProfileState{
+			config.InitialProfileName: {
+				LastRunDate:    "2026-01-15",
+				LastBackupFile: `C:\Backups\CONTABILIDAD_20260115_1200.bak`,
+				SHA256:         "abc123",
+			},
+		},
 	}
 	if err := Save(path, want); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -53,8 +58,8 @@ func TestLoad_CorruptFile_ReturnsEmptyWithError(t *testing.T) {
 	if s == nil {
 		t.Fatal("Load corrupto debería devolver State vacío no-nil")
 	}
-	if s.LastRunDate != "" {
-		t.Errorf("Load corrupto debería devolver State vacío, dio %+v", s)
+	if p, _ := s.ProfileIfExists(config.InitialProfileName); p != nil && p.LastRunDate != "" {
+		t.Errorf("Load corrupto debería devolver State vacío, dio %+v", p)
 	}
 }
 
@@ -70,7 +75,9 @@ func TestLoad_EmptyFile_IsCorrupt(t *testing.T) {
 
 func TestSave_CreatesParentDirs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "dir", "state.json")
-	if err := Save(path, &State{LastRunDate: Today()}); err != nil {
+	s := &State{}
+	s.Profile(config.InitialProfileName).LastRunDate = Today()
+	if err := Save(path, s); err != nil {
 		t.Fatalf("Save debería crear directorios padres: %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -84,31 +91,32 @@ func TestSave_NilState_Errors(t *testing.T) {
 	}
 }
 
-func TestRanOn(t *testing.T) {
-	s := &State{LastRunDate: "2026-01-15"}
-	if !s.RanOn("2026-01-15") {
+func TestProfileState_RanOn(t *testing.T) {
+	p := &ProfileState{LastRunDate: "2026-01-15"}
+	if !p.RanOn("2026-01-15") {
 		t.Error("RanOn mismo día debería ser true")
 	}
-	if s.RanOn("2026-01-16") {
+	if p.RanOn("2026-01-16") {
 		t.Error("RanOn distinto día debería ser false")
 	}
-	if (&State{}).RanOn("2026-01-16") {
-		t.Error("RanOn con estado vacío debería ser false")
-	}
-	var nilState *State
-	if nilState.RanOn("2026-01-16") {
+	var nilP *ProfileState
+	if nilP.RanOn("2026-01-16") {
 		t.Error("RanOn con nil debería ser false, no panic")
 	}
 }
 
+// TestLoad_Fase1Compatibility verifica la migración del esquema viejo
+// (top-level) al namespacing por perfil (D3/D11).
 func TestLoad_Fase1Compatibility(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	fase1JSON := `{
-  "last_run_date": "2026-01-15",
-  "last_backup_file": "C:\\Backups\\CONTABILIDAD_20260115_1200.bak",
-  "sha256": "hashfase1"
-}
-`
+	fase1JSON := "{\n" +
+		"  \"last_run_date\": \"2026-01-15\",\n" +
+		"  \"last_backup_file\": \"C:/Backups/CONTABILIDAD_20260115_1200.bak\",\n" +
+		"  \"sha256\": \"hashfase1\",\n" +
+		"  \"pending_sync\": {\"r2\": true, \"server\": true},\n" +
+		"  \"r2_last_synced_file\": \"CONTABILIDAD_20260114_1200.bak\",\n" +
+		"  \"server_last_synced_file\": \"CONTABILIDAD_20260113_1200.bak\"\n" +
+		"}\n"
 	if err := os.WriteFile(path, []byte(fase1JSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -118,27 +126,52 @@ func TestLoad_Fase1Compatibility(t *testing.T) {
 		t.Fatalf("Load de state Fase 1 falló: %v", err)
 	}
 
-	if st.LastRunDate != "2026-01-15" || st.SHA256 != "hashfase1" {
-		t.Errorf("datos base incorrectos: %+v", st)
+	p, ok := st.ProfileIfExists(config.InitialProfileName)
+	if !ok {
+		t.Fatal("la migración debería crear la sección del perfil inicial")
 	}
-	if st.PendingSync.R2 {
-		t.Errorf("PendingSync.R2 debería ser false por default")
+	if p.LastRunDate != "2026-01-15" || p.SHA256 != "hashfase1" {
+		t.Errorf("datos base incorrectos: %+v", p)
 	}
-	if st.R2LastSyncedFile != "" {
-		t.Errorf("R2LastSyncedFile debería ser vacío por default")
+	if !p.IsPending(config.PlatformCloudflare) || !p.IsPending(config.PlatformServer) {
+		t.Errorf("PendingSync legacy r2/server debería mapear a cloudflare/remote_server: %+v", p.PendingSync)
+	}
+	if p.LastSyncedFiles[config.PlatformCloudflare] != "CONTABILIDAD_20260114_1200.bak" {
+		t.Errorf("r2_last_synced_file debería migrar a cloudflare: %+v", p.LastSyncedFiles)
+	}
+	if p.LastSyncedFiles[config.PlatformServer] != "CONTABILIDAD_20260113_1200.bak" {
+		t.Errorf("server_last_synced_file debería migrar a remote_server: %+v", p.LastSyncedFiles)
+	}
+
+	// Re-guardar y re-cargar: debe ser idempotente
+	if err := Save(path, st); err != nil {
+		t.Fatalf("Save tras migración: %v", err)
+	}
+	st2, err := Load(path)
+	if err != nil {
+		t.Fatalf("re-Load: %v", err)
+	}
+	p2, _ := st2.ProfileIfExists(config.InitialProfileName)
+	if !reflect.DeepEqual(p, p2) {
+		t.Errorf("migración idempotente falló: quiero %+v, obtuve %+v", p, p2)
 	}
 }
 
+// TestSaveLoad_Fase2Fields verifica el esquema nuevo con pending por plataforma (D4).
 func TestSaveLoad_Fase2Fields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	want := &State{
-		LastRunDate:    "2026-01-15",
-		LastBackupFile: `C:\Backups\CONTABILIDAD_20260115_1200.bak`,
-		SHA256:         "abc123",
-		PendingSync: PendingSync{
-			R2: true,
+		Profiles: map[string]*ProfileState{
+			config.InitialProfileName: {
+				LastRunDate:    "2026-01-15",
+				LastBackupFile: `C:\Backups\CONTABILIDAD_20260115_1200.bak`,
+				SHA256:         "abc123",
+				PendingSync:    map[string]bool{config.PlatformCloudflare: true},
+				LastSyncedFiles: map[string]string{
+					config.PlatformCloudflare: "CONTABILIDAD_20260114_1200.bak",
+				},
+			},
 		},
-		R2LastSyncedFile: "CONTABILIDAD_20260114_1200.bak",
 	}
 
 	if err := Save(path, want); err != nil {
@@ -154,59 +187,36 @@ func TestSaveLoad_Fase2Fields(t *testing.T) {
 		t.Errorf("roundtrip Fase 2: quiero %+v, obtuve %+v", want, got)
 	}
 
-	// Probar helpers
-	got.MarkR2Synced("CONTABILIDAD_20260115_1200.bak")
-	if got.PendingSync.R2 {
-		t.Errorf("tras MarkR2Synced, PendingSync.R2 debe ser false")
+	p := got.Profile(config.InitialProfileName)
+	p.MarkSynced(config.PlatformCloudflare, "CONTABILIDAD_20260115_1200.bak")
+	if p.IsPending(config.PlatformCloudflare) {
+		t.Errorf("tras MarkSynced, cloudflare no debe estar pendiente")
 	}
-	if got.R2LastSyncedFile != "CONTABILIDAD_20260115_1200.bak" {
-		t.Errorf("R2LastSyncedFile no coincide")
+	if p.LastSyncedFiles[config.PlatformCloudflare] != "CONTABILIDAD_20260115_1200.bak" {
+		t.Errorf("LastSyncedFiles[cloudflare] no coincide")
 	}
 
-	got.SetPendingR2(true)
-	if !got.PendingSync.R2 {
-		t.Errorf("tras SetPendingR2(true), PendingSync.R2 debe ser true")
+	p.SetPending(config.PlatformServer, true)
+	if !p.IsPending(config.PlatformServer) {
+		t.Errorf("tras SetPending(remote_server,true) debe estar pendiente")
+	}
+	if !p.HasPending() {
+		t.Error("HasPending debería ser true con remote_server pendiente")
 	}
 }
 
-func TestSaveLoad_Fase3ServerFields(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	want := &State{
-		LastRunDate:    "2026-01-15",
-		LastBackupFile: `C:\Backups\CONTABILIDAD_20260115_1200.bak`,
-		SHA256:         "abc123",
-		PendingSync: PendingSync{
-			R2:     false,
-			Server: true,
-		},
-		ServerLastSyncedFile: "CONTABILIDAD_20260114_1200.bak",
+// TestState_PerfilNamespacing verifica que dos perfiles no se pisan (D3).
+func TestState_PerfilNamespacing(t *testing.T) {
+	s := &State{}
+	a := s.Profile("noche")
+	b := s.Profile("dia")
+	a.LastRunDate = "2026-01-15"
+	b.LastRunDate = "2026-01-14"
+	if a.LastRunDate != "2026-01-15" || b.LastRunDate != "2026-01-14" {
+		t.Errorf("las secciones de perfil deben ser independientes: %+v %+v", a, b)
 	}
-
-	if err := Save(path, want); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	got, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("roundtrip Fase 3: quiero %+v, obtuve %+v", want, got)
-	}
-
-	// Probar helpers
-	got.MarkServerSynced("CONTABILIDAD_20260115_1200.bak")
-	if got.PendingSync.Server {
-		t.Errorf("tras MarkServerSynced, PendingSync.Server debe ser false")
-	}
-	if got.ServerLastSyncedFile != "CONTABILIDAD_20260115_1200.bak" {
-		t.Errorf("ServerLastSyncedFile no coincide")
-	}
-
-	got.SetPendingServer(true)
-	if !got.PendingSync.Server {
-		t.Errorf("tras SetPendingServer(true), PendingSync.Server debe ser true")
+	if !s.RanOn("noche", "2026-01-15") || s.RanOn("dia", "2026-01-15") {
+		t.Error("State.RanOn debería delegar en la sección del perfil")
 	}
 }
 
@@ -228,5 +238,3 @@ func TestState_PendingEvents(t *testing.T) {
 		t.Errorf("ClearPendingEvents debería vaciar el slice, tengo %d", len(st.PendingEvents))
 	}
 }
-
-

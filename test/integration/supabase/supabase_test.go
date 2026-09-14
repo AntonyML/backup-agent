@@ -1,4 +1,4 @@
-package supabase_test
+﻿package supabase_test
 
 import (
 	"context"
@@ -22,10 +22,10 @@ import (
 )
 
 // TestSupabase_ResilienceLifecycle valida el ciclo de vida completo de resiliencia:
-// 1. Envío normal a Supabase.
-// 2. Caída de Supabase -> Backup no falla, evento se guarda en state.PendingEvents.
-// 3. Recuperación -> Sync reintenta y envía eventos pendientes a Supabase.
-// 4. Idempotencia -> Envío duplicado del mismo EventID no genera error.
+// 1. EnvÃ­o normal a Supabase.
+// 2. CaÃ­da de Supabase -> Backup no falla, evento se guarda en state.PendingEvents.
+// 3. RecuperaciÃ³n -> Sync reintenta y envÃ­a eventos pendientes a Supabase.
+// 4. Idempotencia -> EnvÃ­o duplicado del mismo EventID no genera error.
 func TestSupabase_ResilienceLifecycle(t *testing.T) {
 	tempDir := t.TempDir()
 	backupDir := filepath.Join(tempDir, "backups")
@@ -99,42 +99,42 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 		EventRepo:    eventRepo,
 	})
 
-	// Paso 1: Ejecución con Supabase ONLINE -> Todo OK
+	// Paso 1: EjecuciÃ³n con Supabase ONLINE -> Todo OK
 	t.Run("Paso1_SupabaseOnline_BackupExitoso", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		err := app.Backup(ctx, application.BackupOptions{Force: true})
 		if err != nil {
-			t.Fatalf("Backup falló con Supabase online: %v", err)
+			t.Fatalf("Backup fallÃ³ con Supabase online: %v", err)
 		}
 		st, err := state.Load(statePath)
 		if err != nil {
 			t.Fatalf("cargar state: %v", err)
 		}
 		if len(st.PendingEvents) != 0 {
-			t.Errorf("no debería haber eventos pendientes con Supabase online, dio %d", len(st.PendingEvents))
+			t.Errorf("no deberÃ­a haber eventos pendientes con Supabase online, dio %d", len(st.PendingEvents))
 		}
 		if receivedCount.Load() == 0 {
-			t.Errorf("servidor debió haber recibido eventos")
+			t.Errorf("servidor debiÃ³ haber recibido eventos")
 		}
 	})
 
-	// Paso 2: Caída de Supabase -> Backup DEBE CONTINUAR y guardar en state.PendingEvents
+	// Paso 2: CaÃ­da de Supabase -> Backup DEBE CONTINUAR y guardar en state.PendingEvents
 	t.Run("Paso2_CaidaSupabase_BackupContinuaYGuardaPendientes", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		serverDown.Store(true)
 
-		// Limpiar estado de ejecución previa para permitir nueva corrida
+		// Limpiar estado de ejecuciÃ³n previa para permitir nueva corrida
 		st, _ := state.Load(statePath)
-		st.LastRunDate = "2026-01-01"
+		st.Profile(config.InitialProfileName).LastRunDate = "2026-01-01"
 		_ = state.Save(statePath, st)
 
 		err := app.Backup(ctx, application.BackupOptions{Force: true})
 		if err != nil {
-			t.Fatalf("el backup NO debe fallar cuando Supabase está caído: %v", err)
+			t.Fatalf("el backup NO debe fallar cuando Supabase estÃ¡ caÃ­do: %v", err)
 		}
 
 		st, err = state.Load(statePath)
@@ -142,12 +142,12 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 			t.Fatalf("cargar state: %v", err)
 		}
 		if len(st.PendingEvents) == 0 {
-			t.Fatalf("se esperaban eventos acumulados en PendingEvents tras caída de Supabase")
+			t.Fatalf("se esperaban eventos acumulados en PendingEvents tras caÃ­da de Supabase")
 		}
 		t.Logf("Eventos pendientes acumulados en state: %d", len(st.PendingEvents))
 	})
 
-	// Paso 3: Recuperación -> Sync vacía PendingEvents hacia Supabase
+	// Paso 3: RecuperaciÃ³n -> Sync vacÃ­a PendingEvents hacia Supabase
 	t.Run("Paso3_Recuperacion_SyncVaciaPendientes", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -157,7 +157,7 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 
 		err := app.Sync(ctx, application.SyncOptions{Force: false})
 		if err != nil {
-			t.Fatalf("Sync falló tras recuperación de Supabase: %v", err)
+			t.Fatalf("Sync fallÃ³ tras recuperaciÃ³n de Supabase: %v", err)
 		}
 
 		st, err := state.Load(statePath)
@@ -165,10 +165,10 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 			t.Fatalf("cargar state: %v", err)
 		}
 		if len(st.PendingEvents) != 0 {
-			t.Errorf("PendingEvents debería quedar vacío tras Sync, tiene %d", len(st.PendingEvents))
+			t.Errorf("PendingEvents deberÃ­a quedar vacÃ­o tras Sync, tiene %d", len(st.PendingEvents))
 		}
 		if receivedCount.Load() <= prevCount {
-			t.Errorf("Sync debió enviar los eventos pendientes al servidor")
+			t.Errorf("Sync debiÃ³ enviar los eventos pendientes al servidor")
 		}
 	})
 
@@ -177,23 +177,23 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		// Enviar el mismo evento dos veces directamente a través del repository
+		// Enviar el mismo evento dos veces directamente a travÃ©s del repository
 		evt := events.NewEvent(events.TypeBackupCompleted, events.StatusSuccess)
 		evt.EventID = "evt_test_idempotency_123"
 
-		// Primer envío
+		// Primer envÃ­o
 		if err := eventRepo.Append(ctx, evt); err != nil {
-			t.Fatalf("primer envío de evento falló: %v", err)
+			t.Fatalf("primer envÃ­o de evento fallÃ³: %v", err)
 		}
 
-		// Segundo envío idéntico (simulando reintento por network glitch)
+		// Segundo envÃ­o idÃ©ntico (simulando reintento por network glitch)
 		if err := eventRepo.Append(ctx, evt); err != nil {
-			t.Fatalf("segundo envío idéntico no debe fallar (idempotencia): %v", err)
+			t.Fatalf("segundo envÃ­o idÃ©ntico no debe fallar (idempotencia): %v", err)
 		}
 	})
 }
 
-// TestSupabase_LiveRemoteProject prueba la integración real con Supabase en la nube
+// TestSupabase_LiveRemoteProject prueba la integraciÃ³n real con Supabase en la nube
 // (oxpxyiucnzpedawwkosy) con la anon key.
 func TestSupabase_LiveRemoteProject(t *testing.T) {
 	if os.Getenv("SUPABASE_LIVE_TEST") != "true" {
@@ -221,14 +221,15 @@ func TestSupabase_LiveRemoteProject(t *testing.T) {
 
 	err := repo.Append(ctx, evt)
 	if err != nil {
-		t.Fatalf("falló la inserción en Supabase remoto: %v", err)
+		t.Fatalf("fallÃ³ la inserciÃ³n en Supabase remoto: %v", err)
 	}
 
 	// 2. Probar duplicado (idempotencia con Prefer: resolution=ignore-duplicates)
 	err = repo.Append(ctx, evt)
 	if err != nil {
-		t.Fatalf("falló el manejo de duplicado en Supabase remoto: %v", err)
+		t.Fatalf("fallÃ³ el manejo de duplicado en Supabase remoto: %v", err)
 	}
 
 	t.Logf("Evento remoto insertado y verificado con idempotencia: %s", testEventID)
 }
+

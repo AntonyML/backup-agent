@@ -1,4 +1,4 @@
-package application
+﻿package application
 
 import (
 	"context"
@@ -102,6 +102,8 @@ func setupTestApp(t *testing.T, sqlEngine SQLEngine, backends []storage.Backend)
 		Retain:           3,
 		LoginTimeoutSec:  15,
 		BackupTimeoutSec: 60,
+		// D9: default productivo true (config cargada de archivo lo hereda de Default()).
+		Schedule: config.ScheduleConfig{SyncAfterBackup: true},
 	}
 
 	discardLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -126,22 +128,22 @@ func TestBackup_Success(t *testing.T) {
 
 	err := app.Backup(context.Background(), BackupOptions{})
 	if err != nil {
-		t.Fatalf("Backup falló inesperadamente: %v", err)
+		t.Fatalf("Backup fallÃ³ inesperadamente: %v", err)
 	}
 
 	st, err := state.Load(statePath)
 	if err != nil {
-		t.Fatalf("Load state falló: %v", err)
+		t.Fatalf("Load state fallÃ³: %v", err)
 	}
 
-	if st.LastRunDate != state.Today() {
-		t.Errorf("LastRunDate no es hoy: %s", st.LastRunDate)
+	if st.Profile(config.InitialProfileName).LastRunDate != state.Today() {
+		t.Errorf("LastRunDate no es hoy: %s", st.Profile(config.InitialProfileName).LastRunDate)
 	}
-	if st.PendingSync.R2 {
-		t.Errorf("PendingSync.R2 debería ser false")
+	if st.Profile(config.InitialProfileName).IsPending(config.PlatformCloudflare) {
+		t.Errorf("PendingSync.R2 deberÃ­a ser false")
 	}
 	if mockR2.uploadCalls != 1 {
-		t.Errorf("R2 upload debería haberse llamado 1 vez, dio %d", mockR2.uploadCalls)
+		t.Errorf("R2 upload deberÃ­a haberse llamado 1 vez, dio %d", mockR2.uploadCalls)
 	}
 }
 
@@ -159,14 +161,14 @@ func TestBackup_RetryableError_SetsPendingSync(t *testing.T) {
 
 	st, err := state.Load(statePath)
 	if err != nil {
-		t.Fatalf("Load state falló: %v", err)
+		t.Fatalf("Load state fallÃ³: %v", err)
 	}
 
 	// El backup local debe haberse completado exitosamente
-	if st.LastRunDate != state.Today() {
+	if st.Profile(config.InitialProfileName).LastRunDate != state.Today() {
 		t.Errorf("LastRunDate debe actualizarse con el backup local")
 	}
-	if !st.PendingSync.R2 {
+	if !st.Profile(config.InitialProfileName).IsPending(config.PlatformCloudflare) {
 		t.Errorf("PendingSync.R2 debe ser true ante RetryableError")
 	}
 }
@@ -177,9 +179,10 @@ func TestBackup_Idempotency(t *testing.T) {
 
 	// Pre-configurar state con fecha de hoy
 	_ = state.Save(statePath, &state.State{
-		LastRunDate:    state.Today(),
-		LastBackupFile: "fake.bak",
-	})
+	Profiles: map[string]*state.ProfileState{
+		config.InitialProfileName: {LastRunDate: state.Today(), LastBackupFile: "fake.bak"},
+	},
+})
 
 	err := app.Backup(context.Background(), BackupOptions{Force: false})
 	if !errors.Is(err, ErrAlreadyRanToday) {
@@ -189,7 +192,7 @@ func TestBackup_Idempotency(t *testing.T) {
 	// Con Force: true, debe ejecutarse sin respetar la idempotencia
 	err = app.Backup(context.Background(), BackupOptions{Force: true})
 	if err != nil {
-		t.Fatalf("con Force: true no debería fallar: %v", err)
+		t.Fatalf("con Force: true no deberÃ­a fallar: %v", err)
 	}
 }
 
@@ -221,24 +224,26 @@ func TestSync_PendingSuccess(t *testing.T) {
 	app, statePath, _ := setupTestApp(t, &mockSQLEngine{}, []storage.Backend{mockR2})
 
 	_ = state.Save(statePath, &state.State{
-		LastRunDate:    "2026-01-01",
-		LastBackupFile: pendingFile,
-		PendingSync: state.PendingSync{
-			R2: true,
+	Profiles: map[string]*state.ProfileState{
+		config.InitialProfileName: {
+			LastRunDate:    "2026-01-01",
+			LastBackupFile: pendingFile,
+			PendingSync:    map[string]bool{config.PlatformCloudflare: true},
 		},
-	})
+	},
+})
 
 	err := app.Sync(context.Background(), SyncOptions{})
 	if err != nil {
-		t.Fatalf("Sync falló: %v", err)
+		t.Fatalf("Sync fallÃ³: %v", err)
 	}
 
 	st, _ := state.Load(statePath)
-	if st.PendingSync.R2 {
-		t.Errorf("PendingSync.R2 debería haberse limpiado a false")
+	if st.Profile(config.InitialProfileName).IsPending(config.PlatformCloudflare) {
+		t.Errorf("PendingSync.R2 deberÃ­a haberse limpiado a false")
 	}
 	if mockR2.uploadCalls != 1 {
-		t.Errorf("R2 upload debió ejecutarse 1 vez, dio %d", mockR2.uploadCalls)
+		t.Errorf("R2 upload debiÃ³ ejecutarse 1 vez, dio %d", mockR2.uploadCalls)
 	}
 }
 
@@ -246,15 +251,18 @@ func TestStatus_Report(t *testing.T) {
 	app, statePath, _ := setupTestApp(t, &mockSQLEngine{}, nil)
 
 	_ = state.Save(statePath, &state.State{
-		LastRunDate:    "2026-09-10",
-		LastBackupFile: `C:\Backups\test.bak`,
-		SHA256:         "hash123",
-		PendingSync:    state.PendingSync{R2: false},
+		Profiles: map[string]*state.ProfileState{
+			config.InitialProfileName: {
+				LastRunDate:    "2026-09-10",
+				LastBackupFile: `C:\Backups\test.bak`,
+				SHA256:         "hash123",
+			},
+		},
 	})
 
 	report, err := app.Status(context.Background())
 	if err != nil {
-		t.Fatalf("Status falló: %v", err)
+		t.Fatalf("Status fallÃ³: %v", err)
 	}
 
 	if report.LastRunDate != "2026-09-10" || report.SHA256 != "hash123" {
@@ -279,13 +287,13 @@ func TestTailLogs(t *testing.T) {
 
 	lines, err := app.TailLogs(context.Background(), 3)
 	if err != nil {
-		t.Fatalf("TailLogs falló: %v", err)
+		t.Fatalf("TailLogs fallÃ³: %v", err)
 	}
 	if len(lines) != 3 {
-		t.Fatalf("esperaba 3 líneas, dio %d", len(lines))
+		t.Fatalf("esperaba 3 lÃ­neas, dio %d", len(lines))
 	}
 	if lines[2] != "linea 5" {
-		t.Errorf("última línea incorrecta: %s", lines[2])
+		t.Errorf("Ãºltima lÃ­nea incorrecta: %s", lines[2])
 	}
 }
 
@@ -308,13 +316,13 @@ func TestRemoveTmpOrphans_KillRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n != 1 {
-		t.Errorf("debería borrar 1 huérfano, borró %d", n)
+		t.Errorf("deberÃ­a borrar 1 huÃ©rfano, borrÃ³ %d", n)
 	}
 	if _, err := os.Stat(filepath.Join(tmpDir, "CONTABILIDAD_20260101_1200.bak")); err != nil {
 		t.Error("el .bak final no debe tocarse")
 	}
 	if _, err := os.Stat(filepath.Join(tmpDir, "CONTABILIDAD_20260102_1200.bak.tmp")); err == nil {
-		t.Error("el .tmp huérfano debería haber sido borrado")
+		t.Error("el .tmp huÃ©rfano deberÃ­a haber sido borrado")
 	}
 	if _, err := os.Stat(filepath.Join(tmpDir, "state.json")); err != nil {
 		t.Error("state.json no debe tocarse")
@@ -332,10 +340,10 @@ func TestAtomicRename(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(src); err == nil {
-		t.Error("rename debería mover src")
+		t.Error("rename deberÃ­a mover src")
 	}
 	if _, err := os.Stat(dst); err != nil {
-		t.Error("rename debería crear dst")
+		t.Error("rename deberÃ­a crear dst")
 	}
 
 	// Con destino existente: reemplaza.
@@ -347,7 +355,7 @@ func TestAtomicRename(t *testing.T) {
 	}
 	content, _ := os.ReadFile(dst)
 	if string(content) != "y" {
-		t.Errorf("debería haber reemplazado el contenido")
+		t.Errorf("deberÃ­a haber reemplazado el contenido")
 	}
 }
 
@@ -358,7 +366,7 @@ func TestGetTUIStatus(t *testing.T) {
 	// Caso 1: Never run
 	bStatus, backends, err := app.GetTUIStatus(context.Background())
 	if err != nil {
-		t.Fatalf("GetTUIStatus falló: %v", err)
+		t.Fatalf("GetTUIStatus fallÃ³: %v", err)
 	}
 	if bStatus.Result != "never_run" {
 		t.Errorf("esperaba never_run, dio: %s", bStatus.Result)
@@ -370,26 +378,29 @@ func TestGetTUIStatus(t *testing.T) {
 		t.Errorf("nombres de backends inesperados: %+v", backends)
 	}
 	if backends[2].Configured {
-		t.Errorf("Server debería figurar como no configurado")
+		t.Errorf("Server deberÃ­a figurar como no configurado")
 	}
 	if backends[3].Configured {
-		t.Errorf("Supabase debería figurar como no configurado")
+		t.Errorf("Supabase deberÃ­a figurar como no configurado")
 	}
 
 	// Caso 2: Con estado exitoso
 	tmpFile := filepath.Join(t.TempDir(), "CONTABILIDAD_20260910_1000.bak")
 	_ = os.WriteFile(tmpFile, []byte("ok"), 0o644)
 	_ = state.Save(statePath, &state.State{
-		LastRunDate:      "2026-09-10",
-		LastBackupFile:   tmpFile,
-		SHA256:           "hash123",
-		PendingSync:      state.PendingSync{R2: false},
-		R2LastSyncedFile: "CONTABILIDAD_20260910_1000.bak",
+		Profiles: map[string]*state.ProfileState{
+			config.InitialProfileName: {
+				LastRunDate:     "2026-09-10",
+				LastBackupFile:  tmpFile,
+				SHA256:          "hash123",
+				LastSyncedFiles: map[string]string{config.PlatformCloudflare: "CONTABILIDAD_20260910_1000.bak"},
+			},
+		},
 	})
 
 	bStatus, backends, err = app.GetTUIStatus(context.Background())
 	if err != nil {
-		t.Fatalf("GetTUIStatus falló: %v", err)
+		t.Fatalf("GetTUIStatus fallÃ³: %v", err)
 	}
 	if bStatus.Result != "success" {
 		t.Errorf("esperaba success, dio: %s", bStatus.Result)
@@ -400,9 +411,13 @@ func TestGetTUIStatus(t *testing.T) {
 
 	// Caso 3: Con pending_sync
 	_ = state.Save(statePath, &state.State{
-		LastRunDate:    "2026-09-10",
-		LastBackupFile: tmpFile,
-		PendingSync:    state.PendingSync{R2: true},
+		Profiles: map[string]*state.ProfileState{
+			config.InitialProfileName: {
+				LastRunDate:    "2026-09-10",
+				LastBackupFile: tmpFile,
+				PendingSync:    map[string]bool{config.PlatformCloudflare: true},
+			},
+		},
 	})
 	bStatus, backends, _ = app.GetTUIStatus(context.Background())
 	if bStatus.Result != "pending_sync" {
@@ -423,12 +438,12 @@ func TestSaveAndGetR2Credentials(t *testing.T) {
 
 	err := app.SaveR2Credentials("https://example.r2.cloudflarestorage.com", "my-bucket", "accKey", "secKey")
 	if err != nil {
-		t.Fatalf("SaveR2Credentials falló: %v", err)
+		t.Fatalf("SaveR2Credentials fallÃ³: %v", err)
 	}
 
 	creds, err := app.GetR2Credentials()
 	if err != nil {
-		t.Fatalf("GetR2Credentials falló: %v", err)
+		t.Fatalf("GetR2Credentials fallÃ³: %v", err)
 	}
 	if creds.Endpoint != "https://example.r2.cloudflarestorage.com" || creds.Bucket != "my-bucket" || creds.AccessKeyID != "accKey" || creds.SecretAccessKey != "secKey" {
 		t.Errorf("credenciales recuperadas no coinciden: %+v", creds)
@@ -452,28 +467,28 @@ func TestBackup_ServerRetryableError_SetsPendingSyncServer(t *testing.T) {
 
 	st, err := state.Load(statePath)
 	if err != nil {
-		t.Fatalf("Load state falló: %v", err)
+		t.Fatalf("Load state fallÃ³: %v", err)
 	}
 
 	// Local debe ser exitoso
-	if st.LastBackupFile == "" || st.SHA256 == "" {
-		t.Errorf("backup local debió confirmarse en state")
+	if st.Profile(config.InitialProfileName).LastBackupFile == "" || st.Profile(config.InitialProfileName).SHA256 == "" {
+		t.Errorf("backup local debiÃ³ confirmarse en state")
 	}
 
 	// R2 exitoso (no pendiente)
-	if st.PendingSync.R2 {
-		t.Errorf("PendingSync.R2 debió ser false")
+	if st.Profile(config.InitialProfileName).IsPending(config.PlatformCloudflare) {
+		t.Errorf("PendingSync.R2 debiÃ³ ser false")
 	}
-	if st.R2LastSyncedFile == "" {
-		t.Errorf("R2LastSyncedFile debió registrarse")
+	if st.Profile(config.InitialProfileName).LastSyncedFiles[config.PlatformCloudflare] == "" {
+		t.Errorf("R2LastSyncedFile debiÃ³ registrarse")
 	}
 
-	// Server falló transitoriamente (pendiente)
-	if !st.PendingSync.Server {
-		t.Errorf("PendingSync.Server debió ser true")
+	// Server fallÃ³ transitoriamente (pendiente)
+	if !st.Profile(config.InitialProfileName).IsPending(config.PlatformServer) {
+		t.Errorf("PendingSync.Server debiÃ³ ser true")
 	}
-	if st.ServerLastSyncedFile != "" {
-		t.Errorf("ServerLastSyncedFile debió permanecer vacío")
+	if st.Profile(config.InitialProfileName).LastSyncedFiles[config.PlatformServer] != "" {
+		t.Errorf("ServerLastSyncedFile debiÃ³ permanecer vacÃ­o")
 	}
 }
 
@@ -488,35 +503,39 @@ func TestSync_ServerPendingSync_RetriesOnlyPending(t *testing.T) {
 
 	// Estado previo: R2 sincronizado, Server pendiente
 	_ = state.Save(statePath, &state.State{
-		LastRunDate:      "2026-09-10",
-		LastBackupFile:   tmpFile,
-		SHA256:           "hash123",
-		PendingSync:      state.PendingSync{R2: false, Server: true},
-		R2LastSyncedFile: "CONTABILIDAD_20260910_1000.bak",
+		Profiles: map[string]*state.ProfileState{
+			config.InitialProfileName: {
+				LastRunDate:     "2026-09-10",
+				LastBackupFile:  tmpFile,
+				SHA256:          "hash123",
+				PendingSync:     map[string]bool{config.PlatformServer: true},
+				LastSyncedFiles: map[string]string{config.PlatformCloudflare: "CONTABILIDAD_20260910_1000.bak"},
+			},
+		},
 	})
 
 	err := app.Sync(context.Background(), SyncOptions{})
 	if err != nil {
-		t.Fatalf("Sync falló: %v", err)
+		t.Fatalf("Sync fallÃ³: %v", err)
 	}
 
-	// R2 no debió ser llamado porque ya estaba sincronizado
+	// R2 no debiÃ³ ser llamado porque ya estaba sincronizado
 	if r2Backend.uploadCalls != 0 {
-		t.Errorf("R2 no debió ser re-subido, llamadas=%d", r2Backend.uploadCalls)
+		t.Errorf("R2 no debiÃ³ ser re-subido, llamadas=%d", r2Backend.uploadCalls)
 	}
 
-	// Server sí debió ser llamado
+	// Server sÃ­ debiÃ³ ser llamado
 	if serverBackend.uploadCalls != 1 {
-		t.Errorf("Server debió recibir 1 llamada de sync, recibió=%d", serverBackend.uploadCalls)
+		t.Errorf("Server debiÃ³ recibir 1 llamada de sync, recibiÃ³=%d", serverBackend.uploadCalls)
 	}
 
-	// Tras la sincronización, Server ya no debe estar pendiente
+	// Tras la sincronizaciÃ³n, Server ya no debe estar pendiente
 	st, _ := state.Load(statePath)
-	if st.PendingSync.Server {
-		t.Errorf("PendingSync.Server debió ser false tras Sync exitoso")
+	if st.Profile(config.InitialProfileName).IsPending(config.PlatformServer) {
+		t.Errorf("PendingSync.Server debiÃ³ ser false tras Sync exitoso")
 	}
-	if st.ServerLastSyncedFile != "CONTABILIDAD_20260910_1000.bak" {
-		t.Errorf("ServerLastSyncedFile no coincide: %s", st.ServerLastSyncedFile)
+	if st.Profile(config.InitialProfileName).LastSyncedFiles[config.PlatformServer] != "CONTABILIDAD_20260910_1000.bak" {
+		t.Errorf("ServerLastSyncedFile no coincide: %s", st.Profile(config.InitialProfileName).LastSyncedFiles[config.PlatformServer])
 	}
 }
 
@@ -528,26 +547,30 @@ func TestBackup_PreSync_DeferredRetryBeforeDaily(t *testing.T) {
 	_ = os.WriteFile(oldBackup, []byte("backup-ayer"), 0o644)
 
 	_ = state.Save(statePath, &state.State{
-		LastRunDate:    "2026-09-09",
-		LastBackupFile: oldBackup,
-		SHA256:         "hash-ayer",
-		PendingSync:    state.PendingSync{Server: true},
+		Profiles: map[string]*state.ProfileState{
+			config.InitialProfileName: {
+				LastRunDate:    "2026-09-09",
+				LastBackupFile: oldBackup,
+				SHA256:         "hash-ayer",
+				PendingSync:    map[string]bool{config.PlatformServer: true},
+			},
+		},
 	})
 
-	// Ejecutar backup del día siguiente
+	// Ejecutar backup del dÃ­a siguiente
 	err := app.Backup(context.Background(), BackupOptions{Force: true})
 	if err != nil {
-		t.Fatalf("Backup falló: %v", err)
+		t.Fatalf("Backup fallÃ³: %v", err)
 	}
 
-	// Server debió recibir 2 llamadas: 1 para el pendiente de ayer + 1 para el de hoy
+	// Server debiÃ³ recibir 2 llamadas: 1 para el pendiente de ayer + 1 para el de hoy
 	if serverBackend.uploadCalls != 2 {
-		t.Errorf("esperaba 2 subidas al servidor (pendiente previo + nuevo del día), hubo %d", serverBackend.uploadCalls)
+		t.Errorf("esperaba 2 subidas al servidor (pendiente previo + nuevo del dÃ­a), hubo %d", serverBackend.uploadCalls)
 	}
 
 	st, _ := state.Load(statePath)
-	if st.PendingSync.Server {
-		t.Errorf("PendingSync.Server debió quedar en false")
+	if st.Profile(config.InitialProfileName).IsPending(config.PlatformServer) {
+		t.Errorf("PendingSync.Server debiÃ³ quedar en false")
 	}
 }
 
@@ -560,14 +583,18 @@ func TestGetTUIStatus_ServerConfiguredAndPending(t *testing.T) {
 
 	// Caso: Server configurado y PENDING
 	_ = state.Save(statePath, &state.State{
-		LastRunDate:    "2026-09-10",
-		LastBackupFile: tmpFile,
-		PendingSync:    state.PendingSync{Server: true},
+		Profiles: map[string]*state.ProfileState{
+			config.InitialProfileName: {
+				LastRunDate:    "2026-09-10",
+				LastBackupFile: tmpFile,
+				PendingSync:    map[string]bool{config.PlatformServer: true},
+			},
+		},
 	})
 
 	bStatus, backends, err := app.GetTUIStatus(context.Background())
 	if err != nil {
-		t.Fatalf("GetTUIStatus falló: %v", err)
+		t.Fatalf("GetTUIStatus fallÃ³: %v", err)
 	}
 
 	if bStatus.Result != "pending_sync" {
@@ -583,21 +610,24 @@ func TestGetTUIStatus_ServerConfiguredAndPending(t *testing.T) {
 	}
 
 	if !serverStatus.Configured {
-		t.Errorf("Server debería figurar como configurado")
+		t.Errorf("Server deberÃ­a figurar como configurado")
 	}
 	if serverStatus.StatusText != "PENDING" {
 		t.Errorf("esperaba status PENDING para Server, dio: %s", serverStatus.StatusText)
 	}
 	if !serverStatus.PendingSync {
-		t.Errorf("PendingSync en ServerStatus debería ser true")
+		t.Errorf("PendingSync en ServerStatus deberÃ­a ser true")
 	}
 
 	// Caso: Server OK
 	_ = state.Save(statePath, &state.State{
-		LastRunDate:          "2026-09-10",
-		LastBackupFile:       tmpFile,
-		PendingSync:          state.PendingSync{Server: false},
-		ServerLastSyncedFile: "CONTABILIDAD_20260910_1000.bak",
+		Profiles: map[string]*state.ProfileState{
+			config.InitialProfileName: {
+				LastRunDate:     "2026-09-10",
+				LastBackupFile:  tmpFile,
+				LastSyncedFiles: map[string]string{config.PlatformServer: "CONTABILIDAD_20260910_1000.bak"},
+			},
+		},
 	})
 
 	bStatus, backends, _ = app.GetTUIStatus(context.Background())
@@ -614,7 +644,7 @@ func TestGetTUIStatus_ServerConfiguredAndPending(t *testing.T) {
 		t.Errorf("esperaba status OK para Server, dio: %s", serverStatus.StatusText)
 	}
 	if !serverStatus.LastSyncOK {
-		t.Errorf("LastSyncOK en ServerStatus debería ser true")
+		t.Errorf("LastSyncOK en ServerStatus deberÃ­a ser true")
 	}
 }
 
@@ -632,7 +662,7 @@ func TestBackup_EmitsOperationalEvents(t *testing.T) {
 
 	ctx := context.Background()
 	if err := app.Backup(ctx, BackupOptions{Force: true}); err != nil {
-		t.Fatalf("Backup falló: %v", err)
+		t.Fatalf("Backup fallÃ³: %v", err)
 	}
 
 	typesReceived := make(map[string]bool)
@@ -663,7 +693,7 @@ func TestBackup_EmitsOperationalEvents(t *testing.T) {
 		t.Fatalf("cargar state: %v", err)
 	}
 	if len(st.PendingEvents) != 0 {
-		t.Errorf("no debería haber eventos pendientes tras envío exitoso, dio: %d", len(st.PendingEvents))
+		t.Errorf("no deberÃ­a haber eventos pendientes tras envÃ­o exitoso, dio: %d", len(st.PendingEvents))
 	}
 }
 
@@ -718,9 +748,9 @@ func TestBackup_SupabaseFailureDoesNotFailBackup(t *testing.T) {
 	app.cfg.Supabase.URL = "http://localhost:54321"
 
 	ctx := context.Background()
-	// El backup debe ser 100% exitoso aunque Supabase esté caído
+	// El backup debe ser 100% exitoso aunque Supabase estÃ© caÃ­do
 	if err := app.Backup(ctx, BackupOptions{Force: true}); err != nil {
-		t.Fatalf("el backup no debe fallar si Supabase está caído: %v", err)
+		t.Fatalf("el backup no debe fallar si Supabase estÃ¡ caÃ­do: %v", err)
 	}
 
 	st, err := state.Load(statePath)
@@ -742,7 +772,9 @@ func TestSync_FlushesPendingEvents(t *testing.T) {
 
 	// Guardar estado con eventos pendientes
 	initialState := &state.State{
-		LastRunDate: "2026-09-10",
+		Profiles: map[string]*state.ProfileState{
+			config.InitialProfileName: {LastRunDate: "2026-09-10"},
+		},
 		PendingEvents: []events.Event{
 			{EventID: "evt_p1", EventType: events.TypeBackupCompleted},
 			{EventID: "evt_p2", EventType: events.TypeAgentFinished},
@@ -753,9 +785,9 @@ func TestSync_FlushesPendingEvents(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	// Sync debe vaciar los eventos pendientes enviándolos a Supabase
+	// Sync debe vaciar los eventos pendientes enviÃ¡ndolos a Supabase
 	if err := app.Sync(ctx, SyncOptions{Force: false}); err != nil {
-		t.Fatalf("Sync falló al sincronizar eventos pendientes: %v", err)
+		t.Fatalf("Sync fallÃ³ al sincronizar eventos pendientes: %v", err)
 	}
 
 	if len(eventRepo.events) != 2 {
@@ -767,7 +799,7 @@ func TestSync_FlushesPendingEvents(t *testing.T) {
 		t.Fatalf("cargar state: %v", err)
 	}
 	if len(st.PendingEvents) != 0 {
-		t.Errorf("PendingEvents debería quedar vacío tras Sync, tiene %d", len(st.PendingEvents))
+		t.Errorf("PendingEvents deberÃ­a quedar vacÃ­o tras Sync, tiene %d", len(st.PendingEvents))
 	}
 }
 
@@ -817,6 +849,17 @@ func TestGetTUIStatus_Supabase(t *testing.T) {
 		t.Errorf("esperaba status PENDING, dio: %s", spStatus.StatusText)
 	}
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

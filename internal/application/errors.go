@@ -17,4 +17,7 @@ var (
 
 	// ErrNoPendingBackup indica que no se encontró archivo pendiente para sincronizar.
 	ErrNoPendingBackup = errors.New("no hay sincronizaciones pendientes")
+
+	// ErrUnknownProfile indica que el perfil solicitado no existe en config.json (exit 2).
+	ErrUnknownProfile = errors.New("perfil desconocido")
 )

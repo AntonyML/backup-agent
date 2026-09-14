@@ -1,4 +1,4 @@
-package recovery_test
+﻿package recovery_test
 
 import (
 	"context"
@@ -62,18 +62,18 @@ func createSeededSQLiteSource(t *testing.T, dbPath string) {
 	}
 }
 
-// 1. .tmp huérfano: se limpian múltiples archivos temporales abandonados al arrancar
+// 1. .tmp huÃ©rfano: se limpian mÃºltiples archivos temporales abandonados al arrancar
 func TestRecovery_OrphanTmpCleanup(t *testing.T) {
 	_, backupDir, dbPath, statePath, lockPath := setupRecoveryTestEnv(t)
 	createSeededSQLiteSource(t, dbPath)
 
-	// Inyectar 3 temporales huérfanos de ejecuciones previas caídas
+	// Inyectar 3 temporales huÃ©rfanos de ejecuciones previas caÃ­das
 	tmp1 := filepath.Join(backupDir, "run_01.bak.tmp")
 	tmp2 := filepath.Join(backupDir, "run_02.bak.tmp")
 	tmp3 := filepath.Join(backupDir, "orphan.tmp")
 	for _, f := range []string{tmp1, tmp2, tmp3} {
 		if err := os.WriteFile(f, []byte("incompleto"), 0o644); err != nil {
-			t.Fatalf("escribir temporal huérfano %s: %v", f, err)
+			t.Fatalf("escribir temporal huÃ©rfano %s: %v", f, err)
 		}
 	}
 
@@ -93,17 +93,17 @@ func TestRecovery_OrphanTmpCleanup(t *testing.T) {
 
 	ctx := context.Background()
 	if err := app.Backup(ctx, application.BackupOptions{}); err != nil {
-		t.Fatalf("backup falló: %v", err)
+		t.Fatalf("backup fallÃ³: %v", err)
 	}
 
 	// Verificar que ninguno de los .tmp subsiste
 	for _, f := range []string{tmp1, tmp2, tmp3} {
 		if _, err := os.Stat(f); !os.IsNotExist(err) {
-			t.Errorf("temporal huérfano %s no fue eliminado al arrancar", f)
+			t.Errorf("temporal huÃ©rfano %s no fue eliminado al arrancar", f)
 		}
 	}
 
-	// Debe haber quedado exactamente 1 .bak válido
+	// Debe haber quedado exactamente 1 .bak vÃ¡lido
 	baks, err := filepath.Glob(filepath.Join(backupDir, "*.bak"))
 	if err != nil || len(baks) != 1 {
 		t.Fatalf("se esperaba exactamente 1 .bak final, encontrados: %v", baks)
@@ -144,12 +144,12 @@ func TestRecovery_ControlledKillWithFailpoint(t *testing.T) {
 	// Debe haber quedado un archivo .bak.tmp abandonado
 	tmps, _ := filepath.Glob(filepath.Join(backupDir, "*.tmp"))
 	if len(tmps) == 0 {
-		t.Fatalf("se esperaba que el failpoint dejara el archivo .tmp huérfano en disco")
+		t.Fatalf("se esperaba que el failpoint dejara el archivo .tmp huÃ©rfano en disco")
 	}
 
 	// state.json no debe haberse creado
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
-		t.Errorf("state.json no debió crearse tras kill prematuro")
+		t.Errorf("state.json no debiÃ³ crearse tras kill prematuro")
 	}
 
 	// Segunda corrida limpia y recupera
@@ -167,30 +167,30 @@ func TestRecovery_ControlledKillWithFailpoint(t *testing.T) {
 	})
 
 	if err := normalApp.Backup(ctx, application.BackupOptions{Force: true}); err != nil {
-		t.Fatalf("segunda corrida tras kill falló: %v", err)
+		t.Fatalf("segunda corrida tras kill fallÃ³: %v", err)
 	}
 
-	// No debe quedar ningún .tmp
+	// No debe quedar ningÃºn .tmp
 	tmpsAfter, _ := filepath.Glob(filepath.Join(backupDir, "*.tmp"))
 	if len(tmpsAfter) != 0 {
-		t.Errorf("la segunda corrida no limpió los .tmp huérfanos: %v", tmpsAfter)
+		t.Errorf("la segunda corrida no limpiÃ³ los .tmp huÃ©rfanos: %v", tmpsAfter)
 	}
 
-	// state.json debe ser válido
+	// state.json debe ser vÃ¡lido
 	st, err := state.Load(statePath)
-	if err != nil || st.LastBackupFile == "" {
-		t.Fatalf("state.json inconsistente tras recuperación: %v", err)
+	if err != nil || st.Profile(config.InitialProfileName).LastBackupFile == "" {
+		t.Fatalf("state.json inconsistente tras recuperaciÃ³n: %v", err)
 	}
 }
 
-// 3. Backup corrupto y VERIFYONLY fallido: detección de bytes alterados y rechazo
+// 3. Backup corrupto y VERIFYONLY fallido: detecciÃ³n de bytes alterados y rechazo
 func TestRecovery_CorruptBackupDetectionAndRejection(t *testing.T) {
 	_, backupDir, dbPath, statePath, lockPath := setupRecoveryTestEnv(t)
 	createSeededSQLiteSource(t, dbPath)
 
 	engine := testdb.NewSQLiteSQLEngine(dbPath)
 
-	// Caso A: Verificar que la corrupción física en SQLite es detectada por VerifyBackup
+	// Caso A: Verificar que la corrupciÃ³n fÃ­sica en SQLite es detectada por VerifyBackup
 	corruptTestPath := filepath.Join(backupDir, "corrupted_target.sqlite")
 	srcData, _ := os.ReadFile(dbPath)
 	_ = os.WriteFile(corruptTestPath, srcData, 0o644)
@@ -200,10 +200,10 @@ func TestRecovery_CorruptBackupDetectionAndRejection(t *testing.T) {
 	ctx := context.Background()
 	verifyErr := engine.VerifyBackup(ctx, nil, corruptTestPath)
 	if verifyErr == nil {
-		t.Fatalf("se esperaba que VerifyBackup rechazara el archivo físicamente corrupto")
+		t.Fatalf("se esperaba que VerifyBackup rechazara el archivo fÃ­sicamente corrupto")
 	}
 
-	// Caso B: Rechazo en el pipeline de la aplicación cuando VerifyBackup falla
+	// Caso B: Rechazo en el pipeline de la aplicaciÃ³n cuando VerifyBackup falla
 	engine.SetSimulateVerifyError(errors.New("RESTORE VERIFYONLY: media set checksum error"))
 	app := application.New(application.Options{
 		Config: config.Config{
@@ -223,21 +223,21 @@ func TestRecovery_CorruptBackupDetectionAndRejection(t *testing.T) {
 		t.Fatalf("se esperaba fallo de verify backup en pipeline, obtenido: %v", err)
 	}
 
-	// El archivo .tmp corrupto debió ser eliminado automáticamente
+	// El archivo .tmp corrupto debiÃ³ ser eliminado automÃ¡ticamente
 	tmps, _ := filepath.Glob(filepath.Join(backupDir, "*.tmp"))
 	if len(tmps) != 0 {
 		t.Errorf("el .tmp corrupto no fue eliminado tras fallo de verify: %v", tmps)
 	}
 
-	// No debe haberse generado ningún .bak definitivo
+	// No debe haberse generado ningÃºn .bak definitivo
 	baks, _ := filepath.Glob(filepath.Join(backupDir, "*.bak"))
 	if len(baks) != 0 {
-		t.Errorf("no debió crearse ningún .bak si verify falló: %v", baks)
+		t.Errorf("no debiÃ³ crearse ningÃºn .bak si verify fallÃ³: %v", baks)
 	}
 
 	// state.json no debe existir
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
-		t.Errorf("state.json no debe crearse si verify falló")
+		t.Errorf("state.json no debe crearse si verify fallÃ³")
 	}
 }
 
@@ -275,7 +275,7 @@ func TestRecovery_SimulatedDiskFull(t *testing.T) {
 	}
 }
 
-// 5. Fallo de estado (JSON corrupto): recuperación tolerante sin crash
+// 5. Fallo de estado (JSON corrupto): recuperaciÃ³n tolerante sin crash
 func TestRecovery_CorruptedStateRecovery(t *testing.T) {
 	_, backupDir, dbPath, statePath, lockPath := setupRecoveryTestEnv(t)
 	createSeededSQLiteSource(t, dbPath)
@@ -302,7 +302,7 @@ func TestRecovery_CorruptedStateRecovery(t *testing.T) {
 
 	ctx := context.Background()
 	if err := app.Backup(ctx, application.BackupOptions{}); err != nil {
-		t.Fatalf("el agente falló ante state.json corrupto: %v", err)
+		t.Fatalf("el agente fallÃ³ ante state.json corrupto: %v", err)
 	}
 
 	// state.json debe haber sido recuperado y reescrito limpiamente
@@ -310,12 +310,12 @@ func TestRecovery_CorruptedStateRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error cargando state.json reconstruido: %v", err)
 	}
-	if st.LastRunDate != state.Today() || st.LastBackupFile == "" || st.SHA256 == "" {
+	if st.Profile(config.InitialProfileName).LastRunDate != state.Today() || st.Profile(config.InitialProfileName).LastBackupFile == "" || st.Profile(config.InitialProfileName).SHA256 == "" {
 		t.Errorf("estado recuperado incompleto: %+v", st)
 	}
 }
 
-// 6. Invariante crítica: NUNCA se pierde la copia válida anterior ante cualquier fallo posterior
+// 6. Invariante crÃ­tica: NUNCA se pierde la copia vÃ¡lida anterior ante cualquier fallo posterior
 func TestRecovery_NeverLosePreviousValidBackupOnFailure(t *testing.T) {
 	_, backupDir, dbPath, statePath, lockPath := setupRecoveryTestEnv(t)
 	createSeededSQLiteSource(t, dbPath)
@@ -335,9 +335,9 @@ func TestRecovery_NeverLosePreviousValidBackupOnFailure(t *testing.T) {
 		LocalBackend: local.New(backupDir),
 	})
 
-	// 1. Crear copia válida A
+	// 1. Crear copia vÃ¡lida A
 	if err := app.Backup(ctx, application.BackupOptions{}); err != nil {
-		t.Fatalf("creación de Backup A falló: %v", err)
+		t.Fatalf("creaciÃ³n de Backup A fallÃ³: %v", err)
 	}
 
 	baks, err := filepath.Glob(filepath.Join(backupDir, "*.bak"))
@@ -353,7 +353,7 @@ func TestRecovery_NeverLosePreviousValidBackupOnFailure(t *testing.T) {
 	sizeA := fiA.Size()
 
 	stA, err := state.Load(statePath)
-	if err != nil || stA.SHA256 != hashA {
+	if err != nil || stA.Profile(config.InitialProfileName).SHA256 != hashA {
 		t.Fatalf("state.json inicial inconsistente")
 	}
 
@@ -361,17 +361,17 @@ func TestRecovery_NeverLosePreviousValidBackupOnFailure(t *testing.T) {
 		t.Helper()
 		fi, err := os.Stat(backupA)
 		if err != nil {
-			t.Fatalf("[%s] Backup A desapareció: %v", stage, err)
+			t.Fatalf("[%s] Backup A desapareciÃ³: %v", stage, err)
 		}
 		if fi.Size() != sizeA {
-			t.Errorf("[%s] Backup A alteró su tamaño: original=%d, actual=%d", stage, sizeA, fi.Size())
+			t.Errorf("[%s] Backup A alterÃ³ su tamaÃ±o: original=%d, actual=%d", stage, sizeA, fi.Size())
 		}
 		currentHash, err := hasher.File(backupA)
 		if err != nil || currentHash != hashA {
 			t.Errorf("[%s] Backup A corrupto: hashA=%s, actual=%s", stage, hashA, currentHash)
 		}
 		currentSt, err := state.Load(statePath)
-		if err != nil || currentSt.LastBackupFile != backupA || currentSt.SHA256 != hashA {
+		if err != nil || currentSt.Profile(config.InitialProfileName).LastBackupFile != backupA || currentSt.Profile(config.InitialProfileName).SHA256 != hashA {
 			t.Errorf("[%s] state.json fue sobreescrito indebidamente: %+v", stage, currentSt)
 		}
 	}
@@ -389,7 +389,7 @@ func TestRecovery_NeverLosePreviousValidBackupOnFailure(t *testing.T) {
 
 	// Escenario C: Falla durante VerifyBackup en intento B
 	engine.SetSimulateBackupError(nil)
-	engine.SetSimulateVerifyError(errors.New("checksum inválido en verify"))
+	engine.SetSimulateVerifyError(errors.New("checksum invÃ¡lido en verify"))
 	_ = app.Backup(ctx, application.BackupOptions{Force: true})
 	assertBackupAIntact("Fallo de VerifyBackup")
 
@@ -416,8 +416,8 @@ func TestRecovery_NeverLosePreviousValidBackupOnFailure(t *testing.T) {
 	_ = killApp.Backup(ctx, application.BackupOptions{Force: true})
 	assertBackupAIntact("Kill abrupto")
 
-	// Escenario E: Recuperación final exitosa tras todos los fallos
-	// Para simular un nuevo timestamp en la misma ejecución de test:
+	// Escenario E: RecuperaciÃ³n final exitosa tras todos los fallos
+	// Para simular un nuevo timestamp en la misma ejecuciÃ³n de test:
 	// El nuevo backup debe crearse limpiando el .tmp, y conservando A
 	recoverApp := application.New(application.Options{
 		Config: config.Config{
@@ -434,30 +434,32 @@ func TestRecovery_NeverLosePreviousValidBackupOnFailure(t *testing.T) {
 
 	// Forzamos la corrida
 	if err := recoverApp.Backup(ctx, application.BackupOptions{Force: true}); err != nil {
-		t.Fatalf("recuperación final falló: %v", err)
+		t.Fatalf("recuperaciÃ³n final fallÃ³: %v", err)
 	}
 
-	// Backup A sigue existiendo y es íntegro
+	// Backup A sigue existiendo y es Ã­ntegro
 	if _, err := os.Stat(backupA); err != nil {
-		t.Fatalf("Backup A fue destruido durante la recuperación: %v", err)
+		t.Fatalf("Backup A fue destruido durante la recuperaciÃ³n: %v", err)
 	}
 	finalHashA, _ := hasher.File(backupA)
 	if finalHashA != hashA {
 		t.Errorf("Backup A fue modificado: esperado=%s, obtenido=%s", hashA, finalHashA)
 	}
 
-	// No deben quedar temporales huérfanos
+	// No deben quedar temporales huÃ©rfanos
 	tmpsFinal, _ := filepath.Glob(filepath.Join(backupDir, "*.tmp"))
 	if len(tmpsFinal) != 0 {
-		t.Errorf("quedaron temporales huérfanos tras recuperación: %v", tmpsFinal)
+		t.Errorf("quedaron temporales huÃ©rfanos tras recuperaciÃ³n: %v", tmpsFinal)
 	}
 
 	// state.json ahora apunta al nuevo backup exitoso
 	finalSt, err := state.Load(statePath)
-	if err != nil || finalSt.LastBackupFile == "" {
-		t.Fatalf("state.json inválido tras recuperación: %v", err)
+	if err != nil || finalSt.Profile(config.InitialProfileName).LastBackupFile == "" {
+		t.Fatalf("state.json invÃ¡lido tras recuperaciÃ³n: %v", err)
 	}
-	if finalSt.SHA256 == "" {
+	if finalSt.Profile(config.InitialProfileName).SHA256 == "" {
 		t.Errorf("state.json no contiene SHA-256")
 	}
 }
+
+

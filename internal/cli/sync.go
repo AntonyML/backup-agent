@@ -17,6 +17,9 @@ func newSyncCmd(appProvider func() (*application.App, error)) *cobra.Command {
 		Short: "Fuerza la sincronización remota de backups pendientes",
 		Long:  "Intenta subir a Cloudflare R2 cualquier backup local que haya quedado marcado como pendiente por fallas previas de red o timeout.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if unattended {
+				installUnattendedStdinGuard(cmd)
+			}
 			app, err := appProvider()
 			if err != nil {
 				return err
@@ -27,7 +30,7 @@ func newSyncCmd(appProvider func() (*application.App, error)) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&unattended, "unattended", false, "modo desatendido (sin prompts ni menús)")
+	cmd.Flags().BoolVar(&unattended, "unattended", false, "modo desatendido (garantiza cero lectura de stdin)")
 	cmd.Flags().BoolVar(&force, "force", false, "forzar sincronización aunque no esté marcado como pendiente")
 
 	return cmd

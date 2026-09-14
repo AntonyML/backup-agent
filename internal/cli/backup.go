@@ -17,6 +17,9 @@ func newBackupCmd(appProvider func() (*application.App, error)) *cobra.Command {
 		Short: "Ejecuta el pipeline de backup (local + R2)",
 		Long:  "Genera el backup de la base de datos SQL Server, valida integridad con RESTORE VERIFYONLY, calcula SHA-256, rota copias locales y sube a Cloudflare R2.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if unattended {
+				installUnattendedStdinGuard(cmd)
+			}
 			app, err := appProvider()
 			if err != nil {
 				return err
@@ -27,7 +30,7 @@ func newBackupCmd(appProvider func() (*application.App, error)) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&unattended, "unattended", false, "modo desatendido para Task Scheduler (sin interacción)")
+	cmd.Flags().BoolVar(&unattended, "unattended", false, "modo desatendido para Task Scheduler (garantiza cero lectura de stdin)")
 	cmd.Flags().BoolVar(&force, "force", false, "forzar ejecución manual aunque ya exista backup del día")
 
 	return cmd

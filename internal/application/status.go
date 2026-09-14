@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 
+	"femucaribe-backup-agent/internal/config"
 	"femucaribe-backup-agent/internal/state"
 )
 
 type StatusReport struct {
+	Profile              string `json:"profile"`
 	LastRunDate          string `json:"last_run_date"`
 	LastBackupFile       string `json:"last_backup_file"`
 	SHA256               string `json:"sha256"`
@@ -25,12 +27,13 @@ type StatusReport struct {
 	PendingEventsCount   int    `json:"pending_events_count"`
 }
 
-// Status consulta el estado operativo y persistente del agente.
+// Status consulta el estado operativo y persistente del agente (del perfil activo).
 func (a *App) Status(ctx context.Context) (*StatusReport, error) {
 	st, err := state.Load(a.statePath)
 	if err != nil {
 		return nil, fmt.Errorf("cargar estado: %w", err)
 	}
+	pst := a.profileState(st)
 
 	lockActive := false
 	if _, err := os.Stat(a.lockPath); err == nil {
@@ -38,13 +41,14 @@ func (a *App) Status(ctx context.Context) (*StatusReport, error) {
 	}
 
 	return &StatusReport{
-		LastRunDate:          st.LastRunDate,
-		LastBackupFile:       st.LastBackupFile,
-		SHA256:               st.SHA256,
-		PendingSyncR2:        st.PendingSync.R2,
-		R2LastSyncedFile:     st.R2LastSyncedFile,
-		PendingSyncServer:    st.PendingSync.Server,
-		ServerLastSyncedFile: st.ServerLastSyncedFile,
+		Profile:              a.profileName,
+		LastRunDate:          pst.LastRunDate,
+		LastBackupFile:       pst.LastBackupFile,
+		SHA256:               pst.SHA256,
+		PendingSyncR2:        pst.IsPending(config.PlatformCloudflare),
+		R2LastSyncedFile:     pst.LastSyncedFiles[config.PlatformCloudflare],
+		PendingSyncServer:    pst.IsPending(config.PlatformServer),
+		ServerLastSyncedFile: pst.LastSyncedFiles[config.PlatformServer],
 		LockActive:           lockActive,
 		Database:             a.cfg.Database,
 		Server:               a.cfg.Server,

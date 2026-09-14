@@ -1,4 +1,4 @@
-package storage_test
+﻿package storage_test
 
 import (
 	"context"
@@ -149,24 +149,24 @@ func TestBackend_PendingSyncLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error cargando state.json: %v", err)
 	}
-	if !st.PendingSync.R2 {
-		t.Errorf("se esperaba st.PendingSync.R2 == true")
+	if !st.Profile(config.InitialProfileName).IsPending(config.PlatformCloudflare) {
+		t.Errorf("se esperaba st.Profile(config.InitialProfileName).IsPending(config.PlatformCloudflare) == true")
 	}
-	if st.LastBackupFile == "" {
-		t.Errorf("LastBackupFile no debe estar vacío")
+	if st.Profile(config.InitialProfileName).LastBackupFile == "" {
+		t.Errorf("LastBackupFile no debe estar vacÃ­o")
 	}
-	pendingFile := st.LastBackupFile
+	pendingFile := st.Profile(config.InitialProfileName).LastBackupFile
 
-	// Corrida 2: MockR2 vuelve a estar en línea (error resuelto)
+	// Corrida 2: MockR2 vuelve a estar en lÃ­nea (error resuelto)
 	mockR2.SetUploadError(nil)
 
-	// Siguiente corrida (con Force para permitir correr el mismo día)
+	// Siguiente corrida (con Force para permitir correr el mismo dÃ­a)
 	err = app.Backup(ctx, application.BackupOptions{Force: true})
 	if err != nil {
-		t.Fatalf("segunda corrida tras recuperación de R2 falló: %v", err)
+		t.Fatalf("segunda corrida tras recuperaciÃ³n de R2 fallÃ³: %v", err)
 	}
 
-	// El archivo pendiente debió haber sido subido
+	// El archivo pendiente debiÃ³ haber sido subido
 	uploaded := mockR2.UploadedFiles()
 	foundPending := false
 	for _, f := range uploaded {
@@ -184,8 +184,8 @@ func TestBackend_PendingSyncLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cargar state.json: %v", err)
 	}
-	if stAfter.PendingSync.R2 {
-		t.Errorf("stAfter.PendingSync.R2 debería ser false tras sincronización exitosa")
+	if stAfter.Profile(config.InitialProfileName).IsPending(config.PlatformCloudflare) {
+		t.Errorf("stAfter.Profile(config.InitialProfileName).IsPending(config.PlatformCloudflare) deberÃ­a ser false tras sincronizaciÃ³n exitosa")
 	}
 }
 
@@ -224,7 +224,7 @@ func TestBackend_FatalErrorAbortsImmediately(t *testing.T) {
 
 }
 
-// 3. Aislamiento estricto: confirmar que ningún backend conoce ni modifica state.json directamente
+// 3. Aislamiento estricto: confirmar que ningÃºn backend conoce ni modifica state.json directamente
 func TestBackend_StateIsolation(t *testing.T) {
 	_, backupDir, dbPath, statePath, lockPath := setupStorageTestEnv(t)
 
@@ -248,7 +248,7 @@ func TestBackend_StateIsolation(t *testing.T) {
 
 	ctx := context.Background()
 	if err := app.Backup(ctx, application.BackupOptions{}); err != nil {
-		t.Fatalf("backup multi-backend falló: %v", err)
+		t.Fatalf("backup multi-backend fallÃ³: %v", err)
 	}
 
 	// Ambos backends deben haber recibido la subida del mismo backup
@@ -261,3 +261,4 @@ func TestBackend_StateIsolation(t *testing.T) {
 		t.Errorf("los backends recibieron archivos distintos: b1=%s, b2=%s", up1[0], up2[0])
 	}
 }
+

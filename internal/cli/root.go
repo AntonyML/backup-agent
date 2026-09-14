@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"femucaribe-backup-agent/internal/application"
 	"femucaribe-backup-agent/internal/config"
@@ -43,11 +44,42 @@ var isTerminal = func(f *os.File) bool {
 
 type RootOptions struct {
 	ConfigPath string
+	Profile    string
+}
+
+// resolveProfile decide con qué perfil opera el comando: el pedido por
+// --profile o, si no se indicó, el perfil activo de la config (D1/D2).
+// Un perfil inexistente es error de configuración (exit 2).
+func resolveProfile(cfg config.Config, requested string) (string, error) {
+	name := strings.TrimSpace(requested)
+	if name == "" {
+		name = cfg.ActiveProfile
+	}
+	if name == "" {
+		name = config.InitialProfileName
+	}
+	if _, ok := cfg.ProfileByName(name); !ok {
+		return "", fmt.Errorf("%w: el perfil %q no existe (disponibles: %s)",
+			ErrConfig, name, strings.Join(profileNames(cfg), ", "))
+	}
+	return name, nil
+}
+
+func profileNames(cfg config.Config) []string {
+	names := make([]string, 0, len(cfg.Profiles))
+	for _, p := range cfg.Profiles {
+		names = append(names, p.Name)
+	}
+	return names
 }
 
 // NewRootCmd crea el comando raíz y registra todos los subcomandos.
-func NewRootCmd(exeDir string, appProvider func(cfgPath string) (*application.App, error)) *cobra.Command {
+// appProvider recibe la ruta de config y el perfil resuelto.
+func NewRootCmd(exeDir string, appProvider func(cfgPath, profile string) (*application.App, error)) *cobra.Command {
 	var configPath string
+	var profileFlag string
+
+	providerFor := func() (*application.App, error) { return appProvider(configPath, profileFlag) }
 
 	cmd := &cobra.Command{
 		Use:   "backup-agent",
@@ -58,7 +90,7 @@ func NewRootCmd(exeDir string, appProvider func(cfgPath string) (*application.Ap
 			// Si hay TTY -> iniciar menú interactivo.
 			// Si NO hay TTY -> mostrar --help y terminar con código != 0.
 			if isTerminal(os.Stdin) {
-				app, err := appProvider(configPath)
+				app, err := providerFor()
 				if err != nil {
 					return err
 				}
@@ -71,20 +103,26 @@ func NewRootCmd(exeDir string, appProvider func(cfgPath string) (*application.Ap
 	}
 
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "ruta a config.json (default: config.json junto al binario)")
+	cmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "perfil de backup (default: active_profile de config.json)")
 
 	// Subcomandos
-	cmd.AddCommand(newBackupCmd(func() (*application.App, error) { return appProvider(configPath) }))
-	cmd.AddCommand(newSyncCmd(func() (*application.App, error) { return appProvider(configPath) }))
-	cmd.AddCommand(newStatusCmd(func() (*application.App, error) { return appProvider(configPath) }))
-	cmd.AddCommand(newLogsCmd(func() (*application.App, error) { return appProvider(configPath) }))
+	cmd.AddCommand(newBackupCmd(providerFor))
+	cmd.AddCommand(newSyncCmd(providerFor))
+	cmd.AddCommand(newStatusCmd(providerFor))
+	cmd.AddCommand(newLogsCmd(providerFor))
 	cmd.AddCommand(newConfigureCmd(exeDir))
-	cmd.AddCommand(newInteractiveCmd(exeDir, func() (*application.App, error) { return appProvider(configPath) }))
+	cmd.AddCommand(newInteractiveCmd(exeDir, providerFor))
+	cmd.AddCommand(newProfileCmd(exeDir, &configPath, &profileFlag))
+	cmd.AddCommand(newScheduleCmd(exeDir, &configPath, &profileFlag))
+	cmd.AddCommand(newConfigCmd(exeDir, &configPath))
+	cmd.AddCommand(newDoctorCmd(exeDir, appProvider))
 
 	return cmd
 }
 
 // BuildDefaultApp arma la instancia productiva de Application inyectando dependencias.
-func BuildDefaultApp(exeDir string, cfgPath string) (*application.App, error) {
+// El perfil se resuelve contra la config: inexistente -> ErrConfig (exit 2).
+func BuildDefaultApp(exeDir string, cfgPath string, profile string) (*application.App, error) {
 	if cfgPath == "" {
 		cfgPath = filepath.Join(exeDir, "config.json")
 	}
@@ -96,25 +134,35 @@ func BuildDefaultApp(exeDir string, cfgPath string) (*application.App, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: validación: %v", ErrConfig, err)
 	}
+	resolved, err := resolveProfile(cfg, profile)
+	if err != nil {
+		return nil, err
+	}
 
 	logger, _ := logging.New(filepath.Join(exeDir, "logs"))
 
 	statePath := filepath.Join(exeDir, "state.json")
-	lockPath := filepath.Join(exeDir, "agent.lock")
+	// Lock POR PERFIL (D2): cada perfil tiene su propio agent-<perfil>.lock.
+	lockPath := filepath.Join(exeDir, "agent-"+resolved+".lock")
 	localBackend := local.New(cfg.BackupDir)
 
 	var backends []storage.Backend
 	datPath := filepath.Join(exeDir, "config.dat")
 	creds, err := secrets.Load(datPath)
-	if err == nil && creds != nil {
+	switch {
+	case err != nil && cfg.Cloudflare.Enabled:
+		logger.Warn("Cloudflare R2 habilitado pero no se pudieron leer credenciales en config.dat; no se subirá a R2", "error", err)
+	case err == nil && creds != nil && !cfg.Cloudflare.Enabled:
+		// Aviso de migración (D9): antes el agente subía a R2 con solo tener
+		// credenciales; ahora Cloudflare.Enabled gobierna la subida.
+		logger.Warn("existen credenciales de R2 en config.dat pero cloudflare.enabled=false: NO se subirá a R2 hasta habilitarla")
+	case err == nil && creds != nil && cfg.Cloudflare.Enabled:
 		r2Client, err := r2.New(context.Background(), *creds)
 		if err == nil && r2Client != nil {
 			backends = append(backends, r2.NewBackend(r2Client, cfg.Database))
 		} else {
 			logger.Warn("cliente R2 no pudo inicializarse", "error", err)
 		}
-	} else {
-		logger.Warn("no se encontraron credenciales de R2 en config.dat")
 	}
 
 	if cfg.RemoteServer.Enabled {
@@ -151,6 +199,7 @@ func BuildDefaultApp(exeDir string, cfgPath string) (*application.App, error) {
 		SecretsPath:  datPath,
 		LockPath:     lockPath,
 		LogDir:       filepath.Join(exeDir, "logs"),
+		Profile:      resolved,
 		Backends:     backends,
 		LocalBackend: localBackend,
 		EventRepo:    eventRepo,
@@ -163,7 +212,8 @@ func ExitCodeForError(err error) int {
 	if err == nil || errors.Is(err, application.ErrAlreadyRanToday) {
 		return ExitOK
 	}
-	if errors.Is(err, application.ErrInvalidConfig) || errors.Is(err, ErrConfig) {
+	if errors.Is(err, application.ErrInvalidConfig) || errors.Is(err, ErrConfig) ||
+		errors.Is(err, application.ErrUnknownProfile) {
 		return ExitConfigErr
 	}
 	if errors.Is(err, application.ErrPendingSync) {
@@ -178,8 +228,8 @@ func ExitCodeForError(err error) int {
 // Execute inicializa y corre el CLI devolviendo el exit code correspondiente.
 func Execute() int {
 	dir := exeDir()
-	cmd := NewRootCmd(dir, func(cfgPath string) (*application.App, error) {
-		return BuildDefaultApp(dir, cfgPath)
+	cmd := NewRootCmd(dir, func(cfgPath, profile string) (*application.App, error) {
+		return BuildDefaultApp(dir, cfgPath, profile)
 	})
 
 	err := cmd.Execute()

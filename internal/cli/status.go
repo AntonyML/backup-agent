@@ -25,6 +25,7 @@ func newStatusCmd(appProvider func() (*application.App, error)) *cobra.Command {
 
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "=== Estado del Agente de Backup ===")
+			fmt.Fprintf(out, "Perfil activo:           %s\n", report.Profile)
 			fmt.Fprintf(out, "Base de datos:           %s\n", report.Database)
 			fmt.Fprintf(out, "Servidor SQL:            %s\n", report.Server)
 			fmt.Fprintf(out, "Directorio local:        %s\n", report.BackupDir)
@@ -34,6 +35,8 @@ func newStatusCmd(appProvider func() (*application.App, error)) *cobra.Command {
 			fmt.Fprintf(out, "SHA-256:                 %s\n", report.SHA256)
 			fmt.Fprintf(out, "Sincronización R2 pend.: %v\n", report.PendingSyncR2)
 			fmt.Fprintf(out, "Último sync en R2:       %s\n", report.R2LastSyncedFile)
+			fmt.Fprintf(out, "Sincronización UNC pend.:%v\n", report.PendingSyncServer)
+			fmt.Fprintf(out, "Último sync en servidor: %s\n", report.ServerLastSyncedFile)
 			fmt.Fprintf(out, "Lock activo:             %v\n", report.LockActive)
 			return nil
 		},

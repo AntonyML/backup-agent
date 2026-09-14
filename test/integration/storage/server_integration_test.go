@@ -1,4 +1,4 @@
-package storage_test
+﻿package storage_test
 
 import (
 	"context"
@@ -61,11 +61,11 @@ func setupServerIntegrationEnv(t *testing.T) (string, string, string, string, st
 	return tempDir, backupDir, serverDir, dbPath, statePath, lockPath
 }
 
-// 1. Pipeline real: Local -> Copia remota a Servidor -> Verificación integridad -> Rotación a 10
+// 1. Pipeline real: Local -> Copia remota a Servidor -> VerificaciÃ³n integridad -> RotaciÃ³n a 10
 func TestServerIntegration_RealPipeline_UploadVerifyRotate10(t *testing.T) {
 	_, backupDir, serverDir, dbPath, statePath, lockPath := setupServerIntegrationEnv(t)
 
-	// Sembrar 10 copias válidas previas en el servidor remoto para probar la frontera exacta
+	// Sembrar 10 copias vÃ¡lidas previas en el servidor remoto para probar la frontera exacta
 	for i := 1; i <= 10; i++ {
 		name := fmt.Sprintf("CONTABILIDAD_TEST_202609%02d_1200.bak", i)
 		p := filepath.Join(serverDir, name)
@@ -100,7 +100,7 @@ func TestServerIntegration_RealPipeline_UploadVerifyRotate10(t *testing.T) {
 	ctx := context.Background()
 	err := app.Backup(ctx, application.BackupOptions{})
 	if err != nil {
-		t.Fatalf("Backup falló: %v", err)
+		t.Fatalf("Backup fallÃ³: %v", err)
 	}
 
 	// 1. Verificar backup local
@@ -108,19 +108,19 @@ func TestServerIntegration_RealPipeline_UploadVerifyRotate10(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cargar state: %v", err)
 	}
-	if st.LastBackupFile == "" {
-		t.Fatalf("LastBackupFile vacío en state")
+	if st.Profile(config.InitialProfileName).LastBackupFile == "" {
+		t.Fatalf("LastBackupFile vacÃ­o en state")
 	}
-	localHash, err := hasher.File(st.LastBackupFile)
+	localHash, err := hasher.File(st.Profile(config.InitialProfileName).LastBackupFile)
 	if err != nil {
 		t.Fatalf("calcular hash local: %v", err)
 	}
-	if st.SHA256 != localHash {
-		t.Errorf("SHA256 en state (%s) != localHash (%s)", st.SHA256, localHash)
+	if st.Profile(config.InitialProfileName).SHA256 != localHash {
+		t.Errorf("SHA256 en state (%s) != localHash (%s)", st.Profile(config.InitialProfileName).SHA256, localHash)
 	}
 
 	// 2. Verificar archivo en servidor remoto
-	remoteBackupFile := filepath.Join(serverDir, filepath.Base(st.LastBackupFile))
+	remoteBackupFile := filepath.Join(serverDir, filepath.Base(st.Profile(config.InitialProfileName).LastBackupFile))
 	remoteHash, err := hasher.File(remoteBackupFile)
 	if err != nil {
 		t.Fatalf("calcular hash remoto: %v", err)
@@ -129,25 +129,25 @@ func TestServerIntegration_RealPipeline_UploadVerifyRotate10(t *testing.T) {
 		t.Errorf("integridad remota violada: remoteHash (%s) != localHash (%s)", remoteHash, localHash)
 	}
 
-	// 3. Verificar que no queden temporales huérfanos
+	// 3. Verificar que no queden temporales huÃ©rfanos
 	tmps, _ := filepath.Glob(filepath.Join(serverDir, "*.tmp"))
 	if len(tmps) != 0 {
 		t.Errorf("quedaron temporales en servidor: %v", tmps)
 	}
 
-	// 4. Verificar rotación: deben quedar exactamente 10 copias
+	// 4. Verificar rotaciÃ³n: deben quedar exactamente 10 copias
 	entries, err := os.ReadDir(serverDir)
 	if err != nil {
 		t.Fatalf("leer serverDir: %v", err)
 	}
 	if len(entries) != 10 {
-		t.Fatalf("esperaba exactamente 10 copias en servidor remoto tras rotación, hay %d", len(entries))
+		t.Fatalf("esperaba exactamente 10 copias en servidor remoto tras rotaciÃ³n, hay %d", len(entries))
 	}
 
-	// La copia más vieja (20260901_1200.bak) debió ser eliminada
+	// La copia mÃ¡s vieja (20260901_1200.bak) debiÃ³ ser eliminada
 	oldestFile := filepath.Join(serverDir, "CONTABILIDAD_TEST_20260901_1200.bak")
 	if _, err := os.Stat(oldestFile); !os.IsNotExist(err) {
-		t.Errorf("el backup más viejo (%s) debió eliminarse", oldestFile)
+		t.Errorf("el backup mÃ¡s viejo (%s) debiÃ³ eliminarse", oldestFile)
 	}
 
 	// La nueva copia debe estar presente
@@ -156,19 +156,19 @@ func TestServerIntegration_RealPipeline_UploadVerifyRotate10(t *testing.T) {
 	}
 
 	// 5. Verificar estado persistente
-	if st.PendingSync.Server {
-		t.Errorf("PendingSync.Server debió ser false")
+	if st.Profile(config.InitialProfileName).IsPending(config.PlatformServer) {
+		t.Errorf("PendingSync.Server debiÃ³ ser false")
 	}
-	if st.ServerLastSyncedFile != filepath.Base(st.LastBackupFile) {
-		t.Errorf("ServerLastSyncedFile (%s) != LastBackupFile (%s)", st.ServerLastSyncedFile, filepath.Base(st.LastBackupFile))
+	if st.Profile(config.InitialProfileName).LastSyncedFiles[config.PlatformServer] != filepath.Base(st.Profile(config.InitialProfileName).LastBackupFile) {
+		t.Errorf("ServerLastSyncedFile (%s) != LastBackupFile (%s)", st.Profile(config.InitialProfileName).LastSyncedFiles[config.PlatformServer], filepath.Base(st.Profile(config.InitialProfileName).LastBackupFile))
 	}
 }
 
-// 2. Interrupción y recuperación: .tmp huérfano de corrida previa abortada (Sección 18)
+// 2. InterrupciÃ³n y recuperaciÃ³n: .tmp huÃ©rfano de corrida previa abortada (SecciÃ³n 18)
 func TestServerIntegration_InterruptionAndRecovery(t *testing.T) {
 	_, backupDir, serverDir, dbPath, statePath, lockPath := setupServerIntegrationEnv(t)
 
-	// Simular corrida previa interrumpida que dejó un archivo .tmp huérfano
+	// Simular corrida previa interrumpida que dejÃ³ un archivo .tmp huÃ©rfano
 	orphanTmp := filepath.Join(serverDir, "CONTABILIDAD_TEST_20260910_0900.bak.tmp")
 	if err := os.WriteFile(orphanTmp, []byte("INCOMPLETE_TRANSFER_FROM_CRASH"), 0o644); err != nil {
 		t.Fatalf("crear orphan tmp: %v", err)
@@ -205,35 +205,35 @@ func TestServerIntegration_InterruptionAndRecovery(t *testing.T) {
 
 	err := app.Backup(context.Background(), application.BackupOptions{})
 	if err != nil {
-		t.Fatalf("Backup falló en corrida con temporales huérfanos: %v", err)
+		t.Fatalf("Backup fallÃ³ en corrida con temporales huÃ©rfanos: %v", err)
 	}
 
-	// 1. El temporal huérfano debió ser limpiado automáticamente
+	// 1. El temporal huÃ©rfano debiÃ³ ser limpiado automÃ¡ticamente
 	if _, err := os.Stat(orphanTmp); !os.IsNotExist(err) {
-		t.Errorf("el archivo temporal huérfano %s debió ser eliminado", orphanTmp)
+		t.Errorf("el archivo temporal huÃ©rfano %s debiÃ³ ser eliminado", orphanTmp)
 	}
 
 	// 2. Los archivos ajenos deben conservarse intactos
 	if _, err := os.Stat(notesFile); err != nil {
-		t.Errorf("notes.txt debió conservarse intacto: %v", err)
+		t.Errorf("notes.txt debiÃ³ conservarse intacto: %v", err)
 	}
 	if _, err := os.Stat(otherDB); err != nil {
-		t.Errorf("OTRABASE backup debió conservarse intacto: %v", err)
+		t.Errorf("OTRABASE backup debiÃ³ conservarse intacto: %v", err)
 	}
 
-	// 3. El nuevo backup debe existir y ser válido
+	// 3. El nuevo backup debe existir y ser vÃ¡lido
 	st, _ := state.Load(statePath)
-	target := filepath.Join(serverDir, filepath.Base(st.LastBackupFile))
+	target := filepath.Join(serverDir, filepath.Base(st.Profile(config.InitialProfileName).LastBackupFile))
 	if _, err := os.Stat(target); err != nil {
-		t.Errorf("el backup nuevo no se creó en el servidor: %v", err)
+		t.Errorf("el backup nuevo no se creÃ³ en el servidor: %v", err)
 	}
 }
 
-// 3. Prevención de pérdida y recuperación: fallo de red no borra copias anteriores y permite sync posterior (Sección 19)
+// 3. PrevenciÃ³n de pÃ©rdida y recuperaciÃ³n: fallo de red no borra copias anteriores y permite sync posterior (SecciÃ³n 19)
 func TestServerIntegration_PreventionOfLoss_NetworkDownThenSync(t *testing.T) {
 	tempDir, backupDir, serverDir, dbPath, statePath, lockPath := setupServerIntegrationEnv(t)
 
-	// Sembrar 10 copias válidas en el servidor
+	// Sembrar 10 copias vÃ¡lidas en el servidor
 	originalHashes := make(map[string]string)
 	for i := 1; i <= 10; i++ {
 		name := fmt.Sprintf("CONTABILIDAD_TEST_202609%02d_1200.bak", i)
@@ -248,7 +248,7 @@ func TestServerIntegration_PreventionOfLoss_NetworkDownThenSync(t *testing.T) {
 
 	engine := testdb.NewSQLiteSQLEngine(dbPath)
 
-	// Simulamos servidor remoto caído usando una ruta inválida o inaccesible
+	// Simulamos servidor remoto caÃ­do usando una ruta invÃ¡lida o inaccesible
 	unreachableDir := filepath.Join(tempDir, "unreachable_server", "share")
 	failingBackend := server.New(server.Config{
 		Enabled:    true,
@@ -281,15 +281,15 @@ func TestServerIntegration_PreventionOfLoss_NetworkDownThenSync(t *testing.T) {
 	// Ejecutar Backup -> debe dar ErrPendingSync
 	err := app.Backup(context.Background(), application.BackupOptions{})
 	if !errors.Is(err, application.ErrPendingSync) {
-		t.Fatalf("esperaba ErrPendingSync ante caída de red remota, dio: %v", err)
+		t.Fatalf("esperaba ErrPendingSync ante caÃ­da de red remota, dio: %v", err)
 	}
 
-	// Regla crítica de seguridad: Las 10 copias en serverDir continúan 100% intactas
+	// Regla crÃ­tica de seguridad: Las 10 copias en serverDir continÃºan 100% intactas
 	for name, wantHash := range originalHashes {
 		p := filepath.Join(serverDir, name)
 		gotHash, rerr := hasher.File(p)
 		if rerr != nil {
-			t.Fatalf("archivo original %s desapareció o es inaccesible tras fallo: %v", name, rerr)
+			t.Fatalf("archivo original %s desapareciÃ³ o es inaccesible tras fallo: %v", name, rerr)
 		}
 		if gotHash != wantHash {
 			t.Fatalf("archivo original %s fue alterado o corrompido", name)
@@ -298,8 +298,8 @@ func TestServerIntegration_PreventionOfLoss_NetworkDownThenSync(t *testing.T) {
 
 	// Verificar estado
 	st, _ := state.Load(statePath)
-	if !st.PendingSync.Server {
-		t.Errorf("PendingSync.Server debió ser true")
+	if !st.Profile(config.InitialProfileName).IsPending(config.PlatformServer) {
+		t.Errorf("PendingSync.Server debiÃ³ ser true")
 	}
 
 	// Restaurar servidor: ahora apunta a serverDir y sin error
@@ -327,29 +327,29 @@ func TestServerIntegration_PreventionOfLoss_NetworkDownThenSync(t *testing.T) {
 
 	// Sincronizar backup pendiente
 	if err := healthyApp.Sync(context.Background(), application.SyncOptions{}); err != nil {
-		t.Fatalf("Sync de recuperación falló: %v", err)
+		t.Fatalf("Sync de recuperaciÃ³n fallÃ³: %v", err)
 	}
 
 	// Verificar que se haya copiado el archivo al servidor y rotado
 	stAfter, _ := state.Load(statePath)
-	if stAfter.PendingSync.Server {
-		t.Errorf("PendingSync.Server debió ser false tras Sync")
+	if stAfter.Profile(config.InitialProfileName).IsPending(config.PlatformServer) {
+		t.Errorf("PendingSync.Server debiÃ³ ser false tras Sync")
 	}
-	if stAfter.ServerLastSyncedFile != filepath.Base(st.LastBackupFile) {
+	if stAfter.Profile(config.InitialProfileName).LastSyncedFiles[config.PlatformServer] != filepath.Base(st.Profile(config.InitialProfileName).LastBackupFile) {
 		t.Errorf("ServerLastSyncedFile no coincide tras Sync")
 	}
 
-	// Deberían quedar 10 copias: el backup 1 se eliminó, el nuevo existe
+	// DeberÃ­an quedar 10 copias: el backup 1 se eliminÃ³, el nuevo existe
 	entries, _ := os.ReadDir(serverDir)
 	if len(entries) != 10 {
-		t.Fatalf("tras rotación post-sync esperaba 10 copias, hay %d", len(entries))
+		t.Fatalf("tras rotaciÃ³n post-sync esperaba 10 copias, hay %d", len(entries))
 	}
 	if _, err := os.Stat(filepath.Join(serverDir, "CONTABILIDAD_TEST_20260901_1200.bak")); !os.IsNotExist(err) {
-		t.Errorf("el backup más viejo (01) debió ser eliminado")
+		t.Errorf("el backup mÃ¡s viejo (01) debiÃ³ ser eliminado")
 	}
 }
 
-// 4. Integración dual: R2 y Server trabajando en simultáneo en el mismo pipeline
+// 4. IntegraciÃ³n dual: R2 y Server trabajando en simultÃ¡neo en el mismo pipeline
 func TestServerIntegration_DualRemote_R2AndServer(t *testing.T) {
 	_, backupDir, serverDir, dbPath, statePath, lockPath := setupServerIntegrationEnv(t)
 
@@ -379,24 +379,24 @@ func TestServerIntegration_DualRemote_R2AndServer(t *testing.T) {
 
 	err := app.Backup(context.Background(), application.BackupOptions{})
 	if err != nil {
-		t.Fatalf("Backup dual falló: %v", err)
+		t.Fatalf("Backup dual fallÃ³: %v", err)
 	}
 
 	st, _ := state.Load(statePath)
-	if st.PendingSync.R2 || st.PendingSync.Server {
+	if st.Profile(config.InitialProfileName).IsPending(config.PlatformCloudflare) || st.Profile(config.InitialProfileName).IsPending(config.PlatformServer) {
 		t.Errorf("ambos backends debieron sincronizar exitosamente")
 	}
-	if st.R2LastSyncedFile == "" || st.ServerLastSyncedFile == "" {
+	if st.Profile(config.InitialProfileName).LastSyncedFiles[config.PlatformCloudflare] == "" || st.Profile(config.InitialProfileName).LastSyncedFiles[config.PlatformServer] == "" {
 		t.Errorf("ambos archivos de sync deben estar registrados")
 	}
 
-	// R2 recibió rotación de 1 copia
+	// R2 recibiÃ³ rotaciÃ³n de 1 copia
 	if mockR2.rotateCalls != 1 {
-		t.Errorf("R2 debió recibir llamada de rotación, llamadas=%d", mockR2.rotateCalls)
+		t.Errorf("R2 debiÃ³ recibir llamada de rotaciÃ³n, llamadas=%d", mockR2.rotateCalls)
 	}
 
 	// Server tiene el archivo verificado
-	targetServerFile := filepath.Join(serverDir, filepath.Base(st.LastBackupFile))
+	targetServerFile := filepath.Join(serverDir, filepath.Base(st.Profile(config.InitialProfileName).LastBackupFile))
 	if _, err := os.Stat(targetServerFile); err != nil {
 		t.Errorf("archivo en servidor remoto no existe: %v", err)
 	}
@@ -425,3 +425,4 @@ func (w *flakyBackendWrapper) Rotate(ctx context.Context, keep int) error {
 func (w *flakyBackendWrapper) LatestRemote(ctx context.Context) (string, error) {
 	return w.inner.LatestRemote(ctx)
 }
+

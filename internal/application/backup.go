@@ -1,4 +1,4 @@
-package application
+﻿package application
 
 import (
 	"context"
@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"femucaribe-backup-agent/internal/config"
 	"femucaribe-backup-agent/internal/events"
 	"femucaribe-backup-agent/internal/hasher"
 	"femucaribe-backup-agent/internal/lock"
+	"femucaribe-backup-agent/internal/retry"
 	"femucaribe-backup-agent/internal/state"
 	"femucaribe-backup-agent/internal/storage"
 	"femucaribe-backup-agent/internal/version"
@@ -32,7 +34,7 @@ func sanitizeError(err error) string {
 	return msg
 }
 
-// Backup orquesta el ciclo de vida completo de un backup según las reglas de negocio.
+// Backup orquesta el ciclo de vida completo de un backup segÃºn las reglas de negocio.
 func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) {
 	startTime := time.Now()
 	a.recordEvent(ctx, events.NewEvent(events.TypeAgentStarted, events.StatusRunning))
@@ -55,14 +57,14 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	}()
 
 	if err := a.cfg.Validate(); err != nil {
-		a.logger.Error("configuración inválida", "error", err)
+		a.logger.Error("configuraciÃ³n invÃ¡lida", "error", err)
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 
 	lh, err := lock.Acquire(a.lockPath)
 	if err != nil {
 		if errors.Is(err, lock.ErrLocked) {
-			a.logger.Error("otra instancia está corriendo", "error", err)
+			a.logger.Error("otra instancia estÃ¡ corriendo", "error", err)
 			return ErrLocked
 		}
 		return fmt.Errorf("adquirir lock %s: %w", a.lockPath, err)
@@ -73,13 +75,13 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		return fmt.Errorf("crear backup_dir %s: %w", a.cfg.BackupDir, err)
 	}
 
-	// Limpieza de .tmp huérfanos al arranque
+	// Limpieza de .tmp huÃ©rfanos al arranque
 	cleaned, err := a.removeTmpOrphans(a.cfg.BackupDir)
 	if err != nil {
-		a.logger.Error("limpieza de .tmp huérfanos", "error", err)
+		a.logger.Error("limpieza de .tmp huÃ©rfanos", "error", err)
 		return fmt.Errorf("limpieza de temporales: %w", err)
 	} else if cleaned > 0 {
-		a.logger.Info("limpieza de huérfanos completada", "cantidad", cleaned)
+		a.logger.Info("limpieza de huÃ©rfanos completada", "cantidad", cleaned)
 	}
 
 	st, err := state.Load(a.statePath)
@@ -88,20 +90,21 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		st = &state.State{}
 	}
 
-	// Sincronización diferida previa de eventos pendientes
+	// SincronizaciÃ³n diferida previa de eventos pendientes
 	if len(st.PendingEvents) > 0 {
 		a.flushPendingEvents(ctx, st)
 	}
 
-	// Sincronización diferida previa: si hay backup pendiente, intentar subirlo antes de hacer el del día
-	if (st.PendingSync.R2 || st.PendingSync.Server) && st.LastBackupFile != "" {
-		a.syncPendingBackup(ctx, st)
+	// SincronizaciÃ³n diferida previa: si hay backup pendiente, intentar subirlo antes de hacer el del dÃ­a
+	pst := a.profileState(st)
+	if pst.HasPending() && pst.LastBackupFile != "" {
+		a.syncPendingBackup(ctx, st, pst)
 	}
 
-	// Idempotencia diaria
-	if st.RanOn(state.Today()) && !opts.Force {
-		a.logger.Info("ya existe backup de hoy, no repito",
-			"archivo", st.LastBackupFile, "sha256", st.SHA256)
+	// Idempotencia diaria POR PERFIL (D3): last_run_date vive en la secciÃ³n del perfil
+	if pst.RanOn(state.Today()) && !opts.Force {
+		a.logger.Info("ya existe backup de hoy para este perfil, no repito",
+			"perfil", a.profileName, "archivo", pst.LastBackupFile, "sha256", pst.SHA256)
 		return ErrAlreadyRanToday
 	}
 
@@ -109,11 +112,11 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	finalPath := filepath.Join(a.cfg.BackupDir, fmt.Sprintf("%s_%s.bak", a.cfg.Database, stamp))
 	tmpPath := finalPath + ".tmp"
 
-	// Conexión y espacio libre
+	// ConexiÃ³n y espacio libre
 	db, err := a.sqlEngine.Open(a.cfg.Server, a.cfg.LoginTimeoutSec)
 	if err != nil {
-		a.logger.Error("conexión SQL falló", "error", err)
-		return fmt.Errorf("conexión SQL: %w", err)
+		a.logger.Error("conexiÃ³n SQL fallÃ³", "error", err)
+		return fmt.Errorf("conexiÃ³n SQL: %w", err)
 	}
 	defer db.Close()
 
@@ -121,10 +124,10 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	needed, err := a.sqlEngine.DatabaseSizeBytes(sizeCtx, db, a.cfg.Database)
 	sizeCancel()
 	if err != nil {
-		a.logger.Error("estimación de tamaño falló", "error", err)
-		return fmt.Errorf("estimación de tamaño: %w", err)
+		a.logger.Error("estimaciÃ³n de tamaÃ±o fallÃ³", "error", err)
+		return fmt.Errorf("estimaciÃ³n de tamaÃ±o: %w", err)
 	}
-	a.logger.Info("tamaño estimado de BD", "db", a.cfg.Database, "bytes", needed)
+	a.logger.Info("tamaÃ±o estimado de BD", "db", a.cfg.Database, "bytes", needed)
 
 	if err := a.sqlEngine.EnsureFreeSpace(a.cfg.BackupDir, needed); err != nil {
 		a.logger.Error("espacio insuficiente en disco", "error", err)
@@ -166,7 +169,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 
 	if a.failpoint != nil {
 		if err := a.failpoint("after_backup_started"); err != nil {
-			// Simula corte abrupto/kill dejando .tmp huérfano en disco
+			// Simula corte abrupto/kill dejando .tmp huÃ©rfano en disco
 			return fmt.Errorf("failpoint after_backup_started: %w", err)
 		}
 	}
@@ -210,9 +213,9 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		}
 	}
 
-	st.LastRunDate = state.Today()
-	st.LastBackupFile = finalPath
-	st.SHA256 = sum
+	pst.LastRunDate = state.Today()
+	pst.LastBackupFile = finalPath
+	pst.SHA256 = sum
 	if err := state.Save(a.statePath, st); err != nil {
 		a.logger.Error("no se pudo guardar state.json local", "error", err)
 		return fmt.Errorf("guardar state.json: %w", err)
@@ -237,10 +240,10 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		AgentVersion: version.Current,
 	})
 
-	// Rotación local
+	// RotaciÃ³n local
 	if a.localBackend != nil {
 		if err := a.localBackend.Rotate(ctx, a.cfg.Retain); err != nil {
-			a.logger.Warn("rotación local con error", "error", err)
+			a.logger.Warn("rotaciÃ³n local con error", "error", err)
 			a.recordEvent(ctx, events.Event{
 				EventID:      events.GenerateID(),
 				Timestamp:    time.Now().UTC(),
@@ -265,11 +268,16 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	a.logger.Info("backup local completado exitosamente",
 		"archivo", finalPath, "sha256", sum)
 
-	// Pipeline de subida a backends remotos
+	// Pipeline de subida a backends remotos. SyncAfterBackup (D9) decide si el
+	// backup dispara la subida tras el Ã©xito; default true = conducta actual.
+	if !a.syncAfterBackup() { // schedule efectivo del perfil (propio o heredado)
+		a.logger.Info("sync_after_backup desactivado: el backup queda solo local", "perfil", a.profileName)
+		return nil
+	}
 	hadPending := false
 	for _, b := range a.backends {
-		uploadCtx, uploadCancel := context.WithTimeout(ctx, 10*time.Minute)
-		uploadErr := b.Upload(uploadCtx, finalPath)
+		uploadCtx, uploadCancel := context.WithTimeout(ctx, a.backendTimeout(b))
+		uploadErr := a.uploadWithRetries(uploadCtx, b, finalPath)
 		uploadCancel()
 
 		isR2 := strings.EqualFold(b.Name(), "r2")
@@ -278,10 +286,10 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		if uploadErr != nil {
 			var retryErr *storage.RetryableError
 			if errors.As(uploadErr, &retryErr) {
-				a.logger.Warn("falla transitoria en backend remoto; se registra sincronización pendiente",
+				a.logger.Warn("falla transitoria en backend remoto; se registra sincronizaciÃ³n pendiente",
 					"backend", b.Name(), "error", uploadErr)
 				if isR2 {
-					st.SetPendingR2(true)
+					pst.SetPending(config.PlatformCloudflare, true)
 					a.recordEvent(ctx, events.Event{
 						EventID:      events.GenerateID(),
 						Timestamp:    time.Now().UTC(),
@@ -293,7 +301,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 						AgentVersion: version.Current,
 					})
 				} else if isServer {
-					st.SetPendingServer(true)
+					pst.SetPending(config.PlatformServer, true)
 					a.recordEvent(ctx, events.Event{
 						EventID:      events.GenerateID(),
 						Timestamp:    time.Now().UTC(),
@@ -330,7 +338,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 			a.logger.Info("subida a backend remoto confirmada",
 				"backend", b.Name(), "archivo", filepath.Base(finalPath))
 			if isR2 {
-				st.MarkR2Synced(filepath.Base(finalPath))
+				pst.MarkSynced(config.PlatformCloudflare, filepath.Base(finalPath))
 				a.recordEvent(ctx, events.Event{
 					EventID:      events.GenerateID(),
 					Timestamp:    time.Now().UTC(),
@@ -340,12 +348,13 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 					FileName:     filepath.Base(finalPath),
 					AgentVersion: version.Current,
 				})
-				if err := b.Rotate(ctx, 1); err != nil {
-					a.logger.Warn("rotación en backend remoto con advertencia",
+				// ReparaciÃ³n D5: keep desde config (default 1) en lugar del literal 1.
+				if err := b.Rotate(ctx, a.cloudflareKeep()); err != nil {
+					a.logger.Warn("rotaciÃ³n en backend remoto con advertencia",
 						"backend", b.Name(), "error", err)
 				}
 			} else if isServer {
-				st.MarkServerSynced(filepath.Base(finalPath))
+				pst.MarkSynced(config.PlatformServer, filepath.Base(finalPath))
 				a.recordEvent(ctx, events.Event{
 					EventID:      events.GenerateID(),
 					Timestamp:    time.Now().UTC(),
@@ -355,8 +364,9 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 					FileName:     filepath.Base(finalPath),
 					AgentVersion: version.Current,
 				})
-				if err := b.Rotate(ctx, 10); err != nil {
-					a.logger.Warn("rotación en backend remoto con advertencia",
+				// ReparaciÃ³n D5: keep desde config (default 10) en lugar del literal 10.
+				if err := b.Rotate(ctx, a.serverKeep()); err != nil {
+					a.logger.Warn("rotaciÃ³n en backend remoto con advertencia",
 						"backend", b.Name(), "error", err)
 					a.recordEvent(ctx, events.Event{
 						EventID:      events.GenerateID(),
@@ -379,7 +389,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 				}
 			} else {
 				if err := b.Rotate(ctx, 0); err != nil {
-					a.logger.Warn("rotación en backend remoto con advertencia",
+					a.logger.Warn("rotaciÃ³n en backend remoto con advertencia",
 						"backend", b.Name(), "error", err)
 				}
 			}
@@ -415,45 +425,63 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	return nil
 }
 
-func (a *App) syncPendingBackup(ctx context.Context, st *state.State) {
-	if _, err := os.Stat(st.LastBackupFile); err != nil {
+func (a *App) syncPendingBackup(ctx context.Context, st *state.State, pst *state.ProfileState) {
+	if _, err := os.Stat(pst.LastBackupFile); err != nil {
 		a.logger.Warn("el archivo pendiente no existe en disco, descartando pendientes",
-			"archivo", st.LastBackupFile)
-		st.SetPendingR2(false)
-		st.SetPendingServer(false)
+			"archivo", pst.LastBackupFile)
+		pst.SetPending(config.PlatformCloudflare, false)
+		pst.SetPending(config.PlatformServer, false)
 		_ = state.Save(a.statePath, st)
 		return
 	}
 
-	a.logger.Info("iniciando sincronización de backup pendiente", "archivo", st.LastBackupFile)
+	a.logger.Info("iniciando sincronizaciÃ³n de backup pendiente", "archivo", pst.LastBackupFile)
 	for _, b := range a.backends {
 		isR2 := strings.EqualFold(b.Name(), "r2")
 		isServer := strings.EqualFold(b.Name(), "server")
 
 		// Solo intentar sincronizar si este backend tiene pendiente
-		if (isR2 && !st.PendingSync.R2) || (isServer && !st.PendingSync.Server) {
+		if (isR2 && !pst.IsPending(config.PlatformCloudflare)) || (isServer && !pst.IsPending(config.PlatformServer)) {
 			continue
 		}
 
-		syncCtx, syncCancel := context.WithTimeout(ctx, 10*time.Minute)
-		err := b.Upload(syncCtx, st.LastBackupFile)
+		syncCtx, syncCancel := context.WithTimeout(ctx, a.backendTimeout(b))
+		err := a.uploadWithRetries(syncCtx, b, pst.LastBackupFile)
 		syncCancel()
 		if err != nil {
-			a.logger.Warn("reintento de sync pendiente falló", "backend", b.Name(), "error", err)
+			a.logger.Warn("reintento de sync pendiente fallÃ³", "backend", b.Name(), "error", err)
 		} else {
 			a.logger.Info("sync pendiente exitosa", "backend", b.Name())
 			if isR2 {
-				st.MarkR2Synced(filepath.Base(st.LastBackupFile))
-				_ = b.Rotate(ctx, 1)
+				pst.MarkSynced(config.PlatformCloudflare, filepath.Base(pst.LastBackupFile))
+				_ = b.Rotate(ctx, a.cloudflareKeep())
 			} else if isServer {
-				st.MarkServerSynced(filepath.Base(st.LastBackupFile))
-				_ = b.Rotate(ctx, 10)
+				pst.MarkSynced(config.PlatformServer, filepath.Base(pst.LastBackupFile))
+				_ = b.Rotate(ctx, a.serverKeep())
 			} else {
 				_ = b.Rotate(ctx, 0)
 			}
 			_ = state.Save(a.statePath, st)
 		}
 	}
+}
+
+// uploadWithRetries ejecuta la subida aplicando la polÃ­tica Ãºnica de reintentos
+// de internal/retry. ReparaciÃ³n D5: Cloudflare.UploadRetries ahora se conecta
+// de verdad (antes existÃ­a en config pero nadie lo usaba). MaxAttempts cuenta
+// el intento inicial: UploadRetries=3 â†’ hasta 4 intentos.
+func (a *App) uploadWithRetries(ctx context.Context, b storage.Backend, path string) error {
+	attempts := 1
+	if strings.EqualFold(b.Name(), "r2") && a.cloudflareRetries() > 0 {
+		attempts = a.cloudflareRetries() + 1
+	}
+	return retry.Do(ctx, retry.Policy{
+		MaxAttempts: attempts,
+		BaseDelay:   2 * time.Second,
+		MaxDelay:    30 * time.Second,
+	}, func(ctx context.Context) error {
+		return b.Upload(ctx, path)
+	})
 }
 
 func (a *App) removeTmpOrphans(dir string) (int, error) {
@@ -471,7 +499,7 @@ func (a *App) removeTmpOrphans(dir string) (int, error) {
 		}
 		full := filepath.Join(dir, e.Name())
 		if err := os.Remove(full); err != nil {
-			return n, fmt.Errorf("borrar huérfano %s: %w", full, err)
+			return n, fmt.Errorf("borrar huÃ©rfano %s: %w", full, err)
 		}
 		n++
 	}
@@ -489,3 +517,6 @@ func atomicRename(src, dst string) error {
 	}
 	return nil
 }
+
+
+
