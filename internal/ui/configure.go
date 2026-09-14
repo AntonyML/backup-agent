@@ -6,11 +6,10 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"femucaribe-backup-agent/internal/application"
 )
 
 type configureModel struct {
-	app     *application.App
+	app     AppConnector
 	styles  Styles
 	inputs  []textinput.Model
 	focused int
@@ -18,7 +17,7 @@ type configureModel struct {
 	success bool
 }
 
-func newConfigureModel(app *application.App, styles Styles) configureModel {
+func newConfigureModel(app AppConnector, styles Styles) configureModel {
 	inputs := make([]textinput.Model, 4)
 
 	// 0: Endpoint
@@ -86,7 +85,7 @@ func (m configureModel) update(msg tea.Msg) (configureModel, tea.Cmd) {
 				m.focused++
 				return m, m.updateFocus()
 			}
-			// En el último campo o botón guardar: guardar
+			// En el Ãºltimo campo o botÃ³n guardar: guardar
 			m.save()
 			return m, nil
 		}
@@ -116,7 +115,7 @@ func (m *configureModel) updateFocus() tea.Cmd {
 
 func (m *configureModel) save() {
 	if m.app == nil {
-		m.err = fmt.Errorf("no hay instancia de aplicación conectada")
+		m.err = fmt.Errorf("no hay instancia de aplicaciÃ³n conectada")
 		return
 	}
 
@@ -139,7 +138,7 @@ func (m configureModel) view() string {
 	s := m.styles
 	var b strings.Builder
 
-	title := s.AppTitle.Render("CONFIGURACIÓN DE CREDENCIALES (R2)")
+	title := s.AppTitle.Render("CONFIGURACIÃ“N DE CREDENCIALES (R2)")
 	sub := s.Subtitle.Render("Los secretos se cifran con Windows DPAPI en config.dat")
 	b.WriteString(fmt.Sprintf("%s  %s\n\n", title, sub))
 
@@ -153,7 +152,7 @@ func (m configureModel) view() string {
 	for i := 0; i < 4; i++ {
 		labelStr := labels[i]
 		if i == m.focused {
-			labelStr = s.InputPrompt.Render("▶ " + labelStr)
+			labelStr = s.InputPrompt.Render("â–¶ " + labelStr)
 		} else {
 			labelStr = s.Label.Render("  " + labelStr)
 		}
@@ -161,10 +160,10 @@ func (m configureModel) view() string {
 		b.WriteString(fmt.Sprintf("%s\n  %s\n\n", labelStr, m.inputs[i].View()))
 	}
 
-	// Botón guardar
+	// BotÃ³n guardar
 	saveBtn := "[ Guardar Credenciales ]"
 	if m.focused == 4 {
-		saveBtn = s.AppTitle.Render("▶ " + saveBtn)
+		saveBtn = s.AppTitle.Render("â–¶ " + saveBtn)
 	} else {
 		saveBtn = s.Desc.Render("  " + saveBtn)
 	}
@@ -172,10 +171,10 @@ func (m configureModel) view() string {
 	b.WriteString("\n\n")
 
 	if m.err != nil {
-		b.WriteString(s.Error.Render(fmt.Sprintf("✖ Error: %v", m.err)))
+		b.WriteString(s.Error.Render(fmt.Sprintf("âœ– Error: %v", m.err)))
 		b.WriteString("\n\n")
 	} else if m.success {
-		b.WriteString(s.Success.Render("✔ Credenciales cifradas con Windows DPAPI y guardadas en config.dat con éxito."))
+		b.WriteString(s.Success.Render("âœ” Credenciales cifradas con Windows DPAPI y guardadas en config.dat con Ã©xito."))
 		b.WriteString("\n\n")
 	}
 
@@ -188,3 +187,4 @@ func (m configureModel) view() string {
 
 	return s.Box.Render(b.String())
 }
+

@@ -1,4 +1,4 @@
-package ui
+﻿package ui
 
 import (
 	"context"
@@ -62,7 +62,7 @@ func (m backupProgressModel) view() string {
 	s := m.styles
 	var b strings.Builder
 
-	title := s.AppTitle.Render("EJECUCIÓN DE BACKUP")
+	title := s.AppTitle.Render("EJECUCIÃ“N DE BACKUP")
 	b.WriteString(fmt.Sprintf("%s\n\n", title))
 
 	if m.running {
@@ -72,23 +72,23 @@ func (m backupProgressModel) view() string {
 		b.WriteString(s.SectionHeader.Render("ETAPAS DEL PROCESO"))
 		b.WriteString("\n")
 		b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("SQL Server:"), s.Value.Render("BACKUP DATABASE y RESTORE VERIFYONLY")))
-		b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Copia Local:"), s.Value.Render("Hash SHA-256 y rotación (3 copias)")))
-		b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Label.Render("Cloudflare R2:"), s.Value.Render("Subida y verificación de integridad")))
+		b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Copia Local:"), s.Value.Render("Hash SHA-256 y rotaciÃ³n (3 copias)")))
+		b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Label.Render("Cloudflare R2:"), s.Value.Render("Subida y verificaciÃ³n de integridad")))
 
-		b.WriteString(s.Muted.Render("Por favor esperá, este proceso puede tardar unos minutos según el tamaño de la base..."))
+		b.WriteString(s.Muted.Render("Por favor esperÃ¡, este proceso puede tardar unos minutos segÃºn el tamaÃ±o de la base..."))
 		b.WriteString("\n\n")
 	} else if m.done {
-		b.WriteString(s.SectionHeader.Render("RESULTADO DE LA OPERACIÓN"))
+		b.WriteString(s.SectionHeader.Render("RESULTADO DE LA OPERACIÃ“N"))
 		b.WriteString("\n\n")
 		if m.err != nil {
-			b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Error.Render("✖ ERROR:"), s.Value.Render(m.err.Error())))
-			b.WriteString(s.Muted.Render("Revisá los logs con [L] o verificá la conectividad a SQL / R2."))
+			b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Error.Render("âœ– ERROR:"), s.Value.Render(m.err.Error())))
+			b.WriteString(s.Muted.Render("RevisÃ¡ los logs con [L] o verificÃ¡ la conectividad a SQL / R2."))
 			b.WriteString("\n\n")
 		} else {
-			b.WriteString(fmt.Sprintf("  %s %s\n", s.Success.Render("✔ SQL Server:"), s.Value.Render("Backup verificado con éxito")))
-			b.WriteString(fmt.Sprintf("  %s %s\n", s.Success.Render("✔ Copia Local:"), s.Value.Render("SHA-256 generado y rotación completada")))
-			b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Success.Render("✔ Cloudflare R2:"), s.Value.Render("Sincronización remota confirmada")))
-			b.WriteString(s.Success.Render("El proceso de backup finalizó exitosamente."))
+			b.WriteString(fmt.Sprintf("  %s %s\n", s.Success.Render("âœ” SQL Server:"), s.Value.Render("Backup verificado con Ã©xito")))
+			b.WriteString(fmt.Sprintf("  %s %s\n", s.Success.Render("âœ” Copia Local:"), s.Value.Render("SHA-256 generado y rotaciÃ³n completada")))
+			b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Success.Render("âœ” Cloudflare R2:"), s.Value.Render("SincronizaciÃ³n remota confirmada")))
+			b.WriteString(s.Success.Render("El proceso de backup finalizÃ³ exitosamente."))
 			b.WriteString("\n\n")
 		}
 
@@ -101,7 +101,7 @@ func (m backupProgressModel) view() string {
 	return s.Box.Render(b.String())
 }
 
-func runBackupCmd(app *application.App) tea.Cmd {
+func runBackupCmd(app AppConnector) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
@@ -109,3 +109,4 @@ func runBackupCmd(app *application.App) tea.Cmd {
 		return backupFinishedMsg{err: err}
 	}
 }
+

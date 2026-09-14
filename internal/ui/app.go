@@ -4,7 +4,6 @@ import (
 	"context"
 
 	tea "charm.land/bubbletea/v2"
-	"femucaribe-backup-agent/internal/application"
 )
 
 type screen int
@@ -15,12 +14,13 @@ const (
 	screenSyncProgress
 	screenStatus
 	screenLogs
+	screenSettings
 	screenConfigure
 	screenHelp
 )
 
 type AppModel struct {
-	app       *application.App
+	app       AppConnector
 	exeDir    string
 	styles    Styles
 	screen    screen
@@ -29,14 +29,15 @@ type AppModel struct {
 	sync      syncProgressModel
 	status    statusModel
 	logs      logsModel
+	settings  settingsModel
 	config    configureModel
 	help      helpModel
 	width     int
 	height    int
 }
 
-// NewApp crea el modelo raíz de Bubble Tea para la interfaz TUI.
-func NewApp(app *application.App, exeDir string) AppModel {
+// NewApp crea el modelo raÃ­z de Bubble Tea para la interfaz TUI.
+func NewApp(app AppConnector, exeDir string) AppModel {
 	styles := DefaultStyles()
 
 	return AppModel{
@@ -49,6 +50,7 @@ func NewApp(app *application.App, exeDir string) AppModel {
 		sync:      newSyncProgressModel(styles),
 		status:    newStatusModel(app, styles),
 		logs:      newLogsModel(app, styles),
+		settings:  newSettingsModel(app, styles),
 		config:    newConfigureModel(app, styles),
 		help:      newHelpModel(styles),
 	}
@@ -65,6 +67,7 @@ func (m *AppModel) refreshDashboard() {
 		if err == nil {
 			m.dashboard.setStatus(bStatus, backends)
 		}
+		m.dashboard.setProfile(m.app.ActiveProfileDetail())
 	}
 }
 
@@ -75,6 +78,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.logs.setSize(msg.Width, msg.Height)
 		m.help.setSize(msg.Width, msg.Height)
+		return m, nil
+
+	case openCredentialsMsg:
+		m.screen = screenConfigure
+		m.config.loadExisting()
+		return m, nil
+
+	case backToDashboardMsg:
+		m.screen = screenDashboard
+		m.refreshDashboard()
 		return m, nil
 
 	case backupFinishedMsg:
@@ -124,8 +137,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logs.loadLogs()
 				return m, nil
 			case "c", "C":
-				m.screen = screenConfigure
-				m.config.loadExisting()
+				m.screen = screenSettings
+				m.settings.load()
 				return m, nil
 			case "h", "H", "?":
 				m.screen = screenHelp
@@ -136,11 +149,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// En pantallas secundarias: volver con Esc (o Q si no estamos editando texto)
-		if msg.String() == "esc" || (msg.String() == "q" && m.screen != screenConfigure) {
-			m.screen = screenDashboard
-			m.refreshDashboard()
-			return m, nil
+		// En pantallas secundarias: volver con Esc (o Q si no estamos editando texto/settings)
+		if m.screen != screenSettings && m.screen != screenConfigure {
+			if msg.String() == "esc" || msg.String() == "q" {
+				m.screen = screenDashboard
+				m.refreshDashboard()
+				return m, nil
+			}
+		}
+
+		// En pantalla de configuración de credenciales (screenConfigure) volver con Esc
+		if m.screen == screenConfigure {
+			if msg.String() == "esc" {
+				m.screen = screenSettings
+				m.settings.load()
+				return m, nil
+			}
 		}
 
 		// En pantallas de progreso finalizadas: Enter también vuelve al Dashboard
@@ -178,10 +202,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.backup, cmd = m.backup.update(msg)
 	case screenSyncProgress:
 		m.sync, cmd = m.sync.update(msg)
+	case screenStatus:
+		var st *statusModel
+		st, cmd = m.status.update(msg)
+		if st != nil {
+			m.status = *st
+		}
 	case screenLogs:
 		m.logs, cmd = m.logs.update(msg)
 	case screenHelp:
 		m.help, cmd = m.help.update(msg)
+	case screenSettings:
+		var sm *settingsModel
+		sm, cmd = m.settings.update(msg)
+		if sm != nil {
+			m.settings = *sm
+		}
 	case screenConfigure:
 		m.config, cmd = m.config.update(msg)
 	}
@@ -202,6 +238,8 @@ func (m AppModel) View() tea.View {
 		content = m.status.view()
 	case screenLogs:
 		content = m.logs.view()
+	case screenSettings:
+		content = m.settings.view()
 	case screenConfigure:
 		content = m.config.view()
 	case screenHelp:
@@ -214,3 +252,4 @@ func (m AppModel) View() tea.View {
 	v.AltScreen = true
 	return v
 }
+

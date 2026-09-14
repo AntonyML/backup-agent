@@ -5,12 +5,14 @@ import (
 	"strings"
 
 	"femucaribe-backup-agent/internal/application"
+	"femucaribe-backup-agent/internal/version"
 )
 
 type dashboardModel struct {
 	styles       Styles
 	backupStatus application.BackupStatus
 	backends     []application.BackendStatus
+	profile      application.ProfileDetail
 	width        int
 	height       int
 }
@@ -26,16 +28,40 @@ func (m *dashboardModel) setStatus(bStatus application.BackupStatus, backends []
 	m.backends = backends
 }
 
+func (m *dashboardModel) setProfile(detail application.ProfileDetail) {
+	m.profile = detail
+}
+
 func (m dashboardModel) view() string {
 	s := m.styles
 	var b strings.Builder
 
 	// Header
 	title := s.AppTitle.Render("FEMUCARIBE BACKUP AGENT")
-	version := s.Subtitle.Render("v2.2 (Charm TUI)")
-	headerLine := fmt.Sprintf("%s  %s", title, version)
+	ver := s.Subtitle.Render("v" + version.Current + " (Charm TUI)")
+	headerLine := fmt.Sprintf("%s  %s", title, ver)
 	b.WriteString(headerLine)
 	b.WriteString("\n\n")
+
+	// Section 0: Perfil Activo
+	if m.profile.Name != "" {
+		b.WriteString(s.SectionHeader.Render("PERFIL ACTIVO"))
+		b.WriteString("\n")
+		platStr := strings.Join(m.profile.Platforms, ", ")
+		b.WriteString(fmt.Sprintf("  %s %s (%s) · %s: %s\n",
+			s.Label.Render("Perfil:"),
+			s.Value.Render(m.profile.Name),
+			m.profile.Kind,
+			s.Label.Render("Destinos"),
+			platStr))
+		if m.profile.NextRun != "" {
+			b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Próxima corrida:"), s.Value.Render(m.profile.NextRun)))
+		}
+		if m.profile.TaskName != "" {
+			b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Tarea Windows:  "), s.Value.Render(m.profile.TaskName)))
+		}
+		b.WriteString("\n")
+	}
 
 	// Section 1: Backup Status
 	b.WriteString(s.SectionHeader.Render("ESTADO DEL BACKUP"))
@@ -91,7 +117,6 @@ func (m dashboardModel) view() string {
 				icon = s.Error.Render("●")
 				statusStr = s.Error.Render("ERROR")
 			}
-
 
 			nameStyled := s.Value.Render(fmt.Sprintf("%-12s", backend.Name))
 			b.WriteString(fmt.Sprintf("  %s %s %s\n", icon, nameStyled, statusStr))

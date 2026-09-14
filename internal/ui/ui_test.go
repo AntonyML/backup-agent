@@ -1,14 +1,17 @@
 package ui
 
 import (
+	"context"
 	"go/parser"
 	"go/token"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"femucaribe-backup-agent/internal/application"
+	"femucaribe-backup-agent/internal/secrets"
 )
 
 
@@ -135,5 +138,153 @@ func TestStatic_NoForbiddenImports(t *testing.T) {
 				t.Errorf("VIOLACIÓN DE ARQUITECTURA: archivo %s importa state (%s)", f, path)
 			}
 		}
+	}
+}
+
+type mockAppConnector struct {
+	settings Settings
+	saved    Settings
+}
+
+func (m *mockAppConnector) GetSettings() Settings { return m.settings }
+func (m *mockAppConnector) SaveSettings(s Settings) error {
+	m.saved = s
+	m.settings = s
+	return nil
+}
+func (m *mockAppConnector) ConfigPath() string { return "config.json" }
+func (m *mockAppConnector) GetTUIStatus(ctx context.Context) (application.BackupStatus, []application.BackendStatus, error) {
+	return application.BackupStatus{}, nil, nil
+}
+func (m *mockAppConnector) Status(ctx context.Context) (*application.StatusReport, error) {
+	return &application.StatusReport{Profile: "full"}, nil
+}
+func (m *mockAppConnector) TailLogs(ctx context.Context, n int) ([]string, error) { return nil, nil }
+func (m *mockAppConnector) SaveR2Credentials(endpoint, bucket, accessKeyID, secretAccessKey string) error {
+	return nil
+}
+func (m *mockAppConnector) GetR2Credentials() (*secrets.Credentials, error) { return nil, nil }
+func (m *mockAppConnector) ProfileName() string                            { return "full" }
+func (m *mockAppConnector) ListProfiles() []application.ProfileInfo {
+	return []application.ProfileInfo{{Name: "full", Active: true}}
+}
+func (m *mockAppConnector) ActiveProfileDetail() application.ProfileDetail {
+	return application.ProfileDetail{ProfileInfo: application.ProfileInfo{Name: "full", Active: true}}
+}
+func (m *mockAppConnector) UseProfile(name string) error             { return nil }
+func (m *mockAppConnector) RemoteSyncTimeout() time.Duration        { return 300 * time.Second }
+func (m *mockAppConnector) CheckPlatforms(ctx context.Context) []application.PlatformCheck {
+	return []application.PlatformCheck{{Name: "Local", OK: true, Detail: "ok"}}
+}
+func (m *mockAppConnector) Backup(ctx context.Context, opts application.BackupOptions) error { return nil }
+func (m *mockAppConnector) Sync(ctx context.Context, opts application.SyncOptions) error     { return nil }
+
+func TestSettings_IntegrationFlow(t *testing.T) {
+	initialSettings := application.Settings{
+		ActiveProfile: "full",
+		Profiles: []application.Profile{
+			{
+				Name:      "full",
+				Kind:      application.KindFull,
+				Platforms: []string{application.PlatformCloudflare},
+			},
+		},
+		Schedule: application.ScheduleConfig{
+			Enabled:   true,
+			Mode:      "weekly",
+			TimeOfDay: "23:00",
+			Weekdays:  []string{"mon"},
+		},
+	}
+
+	mock := &mockAppConnector{settings: initialSettings}
+	appModel := NewApp(mock, t.TempDir())
+
+	keyPress := func(key string) tea.KeyPressMsg {
+		return tea.KeyPressMsg{Code: []rune(key)[0], Text: key}
+	}
+
+	// 1. En Dashboard, presionar C para entrar a Ajustes
+	m, _ := appModel.Update(keyPress("c"))
+	appModel = m.(AppModel)
+	if appModel.screen != screenSettings {
+		t.Fatalf("esperaba screenSettings tras presionar 'c', dio %v", appModel.screen)
+	}
+
+	// 2. Navegar a Programación (índice 2)
+	m, _ = appModel.Update(keyPress("j"))
+	appModel = m.(AppModel)
+	m, _ = appModel.Update(keyPress("j"))
+	appModel = m.(AppModel)
+	if appModel.settings.groupIdx != groupSchedule {
+		t.Fatalf("esperaba groupSchedule (2), dio %d", appModel.settings.groupIdx)
+	}
+
+	// 3. Entrar a Programación
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+	if appModel.settings.level != settingsLevelFields {
+		t.Fatalf("esperaba settingsLevelFields, dio %v", appModel.settings.level)
+	}
+
+	// 4. Navegar a campo Días (weekly) (índice 2 en scheduleFields)
+	m, _ = appModel.Update(keyPress("j"))
+	appModel = m.(AppModel)
+	m, _ = appModel.Update(keyPress("j"))
+	appModel = m.(AppModel)
+	if appModel.settings.fieldIdx != 2 {
+		t.Fatalf("esperaba fieldIdx 2 (Días), dio %d", appModel.settings.fieldIdx)
+	}
+
+	// 5. Activar edición kindMulti con enter
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+	if !appModel.settings.editing || appModel.settings.multi == nil {
+		t.Fatalf("esperaba editing = true y multi != nil")
+	}
+
+	// 6. Mover cursor en multiselect a 'tue' (cursor 1) y marcarlo con espacio
+	m, _ = appModel.Update(keyPress("j"))
+	appModel = m.(AppModel)
+	m, _ = appModel.Update(keyPress(" "))
+	appModel = m.(AppModel)
+
+	// 7. Confirmar y guardar con Esc
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 27, Text: "esc"})
+	appModel = m.(AppModel)
+
+	if appModel.settings.editing {
+		t.Fatalf("esperaba salir de modo editing tras esc")
+	}
+
+	// Verificar que se persistió en el conector
+	foundTue := false
+	for _, d := range mock.saved.Schedule.Weekdays {
+		if d == "tue" {
+			foundTue = true
+			break
+		}
+	}
+	if !foundTue {
+		t.Errorf("esperaba que 'tue' estuviera en Weekdays guardados, dio: %v", mock.saved.Schedule.Weekdays)
+	}
+
+	// 8. Esc para volver a grupos
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 27, Text: "esc"})
+	appModel = m.(AppModel)
+	if appModel.settings.level != settingsLevelGroups {
+		t.Fatalf("esperaba volver a settingsLevelGroups, dio %v", appModel.settings.level)
+	}
+
+	// 9. Esc para volver al dashboard
+	m, cmd := appModel.Update(tea.KeyPressMsg{Code: 27, Text: "esc"})
+	appModel = m.(AppModel)
+	if cmd != nil {
+		msg := cmd()
+		m, _ = appModel.Update(msg)
+		appModel = m.(AppModel)
+	}
+	if appModel.screen != screenDashboard {
+		t.Fatalf("esperaba volver a screenDashboard, dio %v", appModel.screen)
 	}
 }

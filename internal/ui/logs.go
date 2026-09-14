@@ -7,18 +7,17 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"femucaribe-backup-agent/internal/application"
 )
 
 type logsModel struct {
-	app      *application.App
+	app      AppConnector
 	styles   Styles
 	viewport viewport.Model
 	ready    bool
 	err      error
 }
 
-func newLogsModel(app *application.App, styles Styles) logsModel {
+func newLogsModel(app AppConnector, styles Styles) logsModel {
 	vp := viewport.New()
 	vp.SetWidth(80)
 	vp.SetHeight(20)
@@ -47,7 +46,7 @@ func (m *logsModel) setSize(w, h int) {
 
 func (m *logsModel) loadLogs() {
 	if m.app == nil {
-		m.viewport.SetContent("No hay instancia de aplicación conectada.")
+		m.viewport.SetContent("No hay instancia de aplicaciÃ³n conectada.")
 		return
 	}
 
@@ -59,7 +58,7 @@ func (m *logsModel) loadLogs() {
 	}
 
 	if len(lines) == 0 {
-		m.viewport.SetContent("No hay registros disponibles para el día de hoy.")
+		m.viewport.SetContent("No hay registros disponibles para el dÃ­a de hoy.")
 		return
 	}
 
@@ -78,7 +77,7 @@ func (m logsModel) view() string {
 	var b strings.Builder
 
 	title := s.AppTitle.Render("REGISTROS DEL AGENTE")
-	sub := s.Subtitle.Render("Últimas líneas del log diario (desplazate con las flechas o rueda del mouse)")
+	sub := s.Subtitle.Render("Ãšltimas lÃ­neas del log diario (desplazate con las flechas o rueda del mouse)")
 	b.WriteString(fmt.Sprintf("%s  %s\n\n", title, sub))
 
 	b.WriteString(m.viewport.View())
@@ -87,9 +86,10 @@ func (m logsModel) view() string {
 	keys := []string{
 		fmt.Sprintf("%s %s", s.Key.Render("[Esc/Q]"), s.Desc.Render("Volver al Dashboard")),
 		fmt.Sprintf("%s %s", s.Key.Render("[R]"), s.Desc.Render("Refrescar")),
-		fmt.Sprintf("%s %s", s.Key.Render("[↑/↓/PgUp/PgDn]"), s.Desc.Render("Scroll")),
+		fmt.Sprintf("%s %s", s.Key.Render("[â†‘/â†“/PgUp/PgDn]"), s.Desc.Render("Scroll")),
 	}
 	b.WriteString(s.HelpBar.Render(strings.Join(keys, "  ")))
 
 	return s.Box.Render(b.String())
 }
+

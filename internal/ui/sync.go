@@ -1,10 +1,9 @@
-package ui
+﻿package ui
 
 import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -62,21 +61,21 @@ func (m syncProgressModel) view() string {
 	s := m.styles
 	var b strings.Builder
 
-	title := s.AppTitle.Render("SINCRONIZACIÓN REMOTA A R2")
+	title := s.AppTitle.Render("SINCRONIZACIÃ“N REMOTA A R2")
 	b.WriteString(fmt.Sprintf("%s\n\n", title))
 
 	if m.running {
 		spin := m.spinner.View()
 		b.WriteString(fmt.Sprintf("%s %s\n\n", spin, s.Info.Render("Subiendo backup pendiente a Cloudflare R2...")))
-		b.WriteString(s.Muted.Render("Verificando tamaño y rotación remota..."))
+		b.WriteString(s.Muted.Render("Verificando tamaÃ±o y rotaciÃ³n remota..."))
 		b.WriteString("\n\n")
 	} else if m.done {
-		b.WriteString(s.SectionHeader.Render("RESULTADO DE LA SINCRONIZACIÓN"))
+		b.WriteString(s.SectionHeader.Render("RESULTADO DE LA SINCRONIZACIÃ“N"))
 		b.WriteString("\n\n")
 		if m.err != nil {
-			b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Error.Render("✖ ERROR:"), s.Value.Render(m.err.Error())))
+			b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Error.Render("âœ– ERROR:"), s.Value.Render(m.err.Error())))
 		} else {
-			b.WriteString(s.Success.Render("✔ Sincronización a Cloudflare R2 completada exitosamente."))
+			b.WriteString(s.Success.Render("âœ” SincronizaciÃ³n a Cloudflare R2 completada exitosamente."))
 			b.WriteString("\n\n")
 		}
 
@@ -89,11 +88,12 @@ func (m syncProgressModel) view() string {
 	return s.Box.Render(b.String())
 }
 
-func runSyncCmd(app *application.App) tea.Cmd {
+func runSyncCmd(app AppConnector) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), app.RemoteSyncTimeout())
 		defer cancel()
 		err := app.Sync(ctx, application.SyncOptions{Force: true})
 		return syncFinishedMsg{err: err}
 	}
 }
+
