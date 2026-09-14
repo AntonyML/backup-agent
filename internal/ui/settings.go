@@ -667,12 +667,15 @@ func (m settingsModel) view() string {
 	} else if m.saved {
 		header += "  " + s.Success.Render("✔ guardado")
 	}
-	b.WriteString(header + "\n")
+	b.WriteString(header)
+	b.WriteString("\n")
 
 	if m.level == settingsLevelGroups {
-		b.WriteString(s.Subtitle.Render("Elegí un grupo para revisar sus parámetros") + "\n")
+		b.WriteString(s.Subtitle.Render("Elegí un grupo para revisar sus parámetros"))
+		b.WriteString("\n")
 	} else if g := m.currentGroup(); g != nil {
-		b.WriteString(s.Subtitle.Render(fmt.Sprintf("Ajustes › %s", g.Title)) + "\n")
+		b.WriteString(s.Subtitle.Render(fmt.Sprintf("Ajustes › %s", g.Title)))
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 
@@ -683,11 +686,15 @@ func (m settingsModel) view() string {
 	}
 
 	if m.err != nil {
-		b.WriteString("\n" + s.Error.Render(fmt.Sprintf("✖ %v", m.err)) + "\n")
+		b.WriteString("\n")
+		b.WriteString(s.Error.Render(fmt.Sprintf("✖ %v", m.err)))
+		b.WriteString("\n")
 	}
 
-	b.WriteString("\n" + s.HelpBar.Render(strings.Join(m.helpKeys(), "  ")))
-	b.WriteString("\n" + s.Muted.Render("  Los cambios se guardan en config.json. Backends y credenciales se rearman al reiniciar el agente."))
+	b.WriteString("\n")
+	b.WriteString(s.HelpBar.Render(strings.Join(m.helpKeys(), "  ")))
+	b.WriteString("\n")
+	b.WriteString(s.Muted.Render("  Los cambios se guardan en config.json. Backends y credenciales se rearman al reiniciar el agente."))
 
 	return s.Box.Render(b.String())
 }
@@ -706,7 +713,8 @@ func (m settingsModel) viewGroups(b *strings.Builder) {
 		summary := s.Muted.Render(g.Summary(m.cfg))
 		b.WriteString(fmt.Sprintf("%s%-26s %s\n", cursor, title, summary))
 		if i == m.groupIdx {
-			b.WriteString(s.Muted.Render("    "+g.Help) + "\n")
+			b.WriteString(s.Muted.Render("    " + g.Help))
+			b.WriteString("\n")
 		}
 		b.WriteString("\n")
 	}
@@ -728,15 +736,24 @@ func (m settingsModel) viewFields(b *strings.Builder) {
 			}
 		}
 		if selected && m.editing {
-			b.WriteString(s.InputPrompt.Render("▶ "+label) + "\n")
-			b.WriteString("  " + m.input.View() + "\n\n")
+			b.WriteString(s.InputPrompt.Render("▶ " + label))
+			b.WriteString("\n")
+			b.WriteString("  " + m.input.View())
+			b.WriteString("\n\n")
 			continue
 		}
 		if selected {
-			b.WriteString(s.InputPrompt.Render(fmt.Sprintf("▶ %-28s", label)) + " " + s.Value.Render(value) + "\n")
-			b.WriteString(s.Muted.Render("    "+f.Help) + "\n\n")
+			b.WriteString(s.InputPrompt.Render(fmt.Sprintf("▶ %-28s", label)))
+			b.WriteString(" ")
+			b.WriteString(s.Value.Render(value))
+			b.WriteString("\n")
+			b.WriteString(s.Muted.Render("    " + f.Help))
+			b.WriteString("\n\n")
 		} else {
-			b.WriteString(s.Label.Render(fmt.Sprintf("  %-28s", label)) + " " + s.Desc.Render(value) + "\n\n")
+			b.WriteString(s.Label.Render(fmt.Sprintf("  %-28s", label)))
+			b.WriteString(" ")
+			b.WriteString(s.Desc.Render(value))
+			b.WriteString("\n\n")
 		}
 	}
 }

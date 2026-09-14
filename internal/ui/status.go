@@ -50,14 +50,16 @@ func (m statusModel) view() string {
 		r := m.report
 
 		// Parámetros SQL
-		b.WriteString(s.SectionHeader.Render("CONFIGURACIÓN DE BASE DE DATOS") + "\n")
+		b.WriteString(s.SectionHeader.Render("CONFIGURACIÓN DE BASE DE DATOS"))
+		b.WriteString("\n")
 		b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Base de datos:"), s.Value.Render(r.Database)))
 		b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Servidor SQL:"), s.Value.Render(r.Server)))
 		b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Directorio:"), s.Value.Render(r.BackupDir)))
 		b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Label.Render("Retención:"), s.Value.Render(fmt.Sprintf("%d copias", r.Retain))))
 
 		// Proceso y Lock
-		b.WriteString(s.SectionHeader.Render("PROCESO Y CONCURRENCIA") + "\n")
+		b.WriteString(s.SectionHeader.Render("PROCESO Y CONCURRENCIA"))
+		b.WriteString("\n")
 		lockText := s.Success.Render("Libre")
 		if r.LockActive {
 			lockText = s.Warning.Render("Activo (en ejecución)")
@@ -65,7 +67,8 @@ func (m statusModel) view() string {
 		b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Label.Render("Lock file:"), lockText))
 
 		// Copia local
-		b.WriteString(s.SectionHeader.Render("ÚLTIMA COPIA LOCAL") + "\n")
+		b.WriteString(s.SectionHeader.Render("ÚLTIMA COPIA LOCAL"))
+		b.WriteString("\n")
 		lastDate := r.LastRunDate
 		if lastDate == "" {
 			lastDate = "Nunca"
@@ -81,7 +84,8 @@ func (m statusModel) view() string {
 		}
 
 		// Remoto R2
-		b.WriteString(s.SectionHeader.Render("ESTADO REMOTO CLOUDFLARE R2") + "\n")
+		b.WriteString(s.SectionHeader.Render("ESTADO REMOTO CLOUDFLARE R2"))
+		b.WriteString("\n")
 		pendingText := s.Success.Render("Al día (sin pendientes)")
 		if r.PendingSyncR2 {
 			pendingText = s.Warning.Render("PENDIENTE DE SUBIDA")
@@ -93,7 +97,8 @@ func (m statusModel) view() string {
 			b.WriteString("\n")
 		}
 	} else {
-		b.WriteString(s.Muted.Render("Cargando información...") + "\n\n")
+		b.WriteString(s.Muted.Render("Cargando información..."))
+		b.WriteString("\n\n")
 	}
 
 	keys := []string{

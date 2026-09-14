@@ -69,22 +69,27 @@ func (m backupProgressModel) view() string {
 		spin := m.spinner.View()
 		b.WriteString(fmt.Sprintf("%s %s\n\n", spin, s.Info.Render("Ejecutando pipeline de backup en segundo plano...")))
 
-		b.WriteString(s.SectionHeader.Render("ETAPAS DEL PROCESO") + "\n")
+		b.WriteString(s.SectionHeader.Render("ETAPAS DEL PROCESO"))
+		b.WriteString("\n")
 		b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("SQL Server:"), s.Value.Render("BACKUP DATABASE y RESTORE VERIFYONLY")))
 		b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Copia Local:"), s.Value.Render("Hash SHA-256 y rotación (3 copias)")))
 		b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Label.Render("Cloudflare R2:"), s.Value.Render("Subida y verificación de integridad")))
 
-		b.WriteString(s.Muted.Render("Por favor esperá, este proceso puede tardar unos minutos según el tamaño de la base...") + "\n\n")
+		b.WriteString(s.Muted.Render("Por favor esperá, este proceso puede tardar unos minutos según el tamaño de la base..."))
+		b.WriteString("\n\n")
 	} else if m.done {
-		b.WriteString(s.SectionHeader.Render("RESULTADO DE LA OPERACIÓN") + "\n\n")
+		b.WriteString(s.SectionHeader.Render("RESULTADO DE LA OPERACIÓN"))
+		b.WriteString("\n\n")
 		if m.err != nil {
 			b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Error.Render("✖ ERROR:"), s.Value.Render(m.err.Error())))
-			b.WriteString(s.Muted.Render("Revisá los logs con [L] o verificá la conectividad a SQL / R2.") + "\n\n")
+			b.WriteString(s.Muted.Render("Revisá los logs con [L] o verificá la conectividad a SQL / R2."))
+			b.WriteString("\n\n")
 		} else {
 			b.WriteString(fmt.Sprintf("  %s %s\n", s.Success.Render("✔ SQL Server:"), s.Value.Render("Backup verificado con éxito")))
 			b.WriteString(fmt.Sprintf("  %s %s\n", s.Success.Render("✔ Copia Local:"), s.Value.Render("SHA-256 generado y rotación completada")))
 			b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Success.Render("✔ Cloudflare R2:"), s.Value.Render("Sincronización remota confirmada")))
-			b.WriteString(s.Success.Render("El proceso de backup finalizó exitosamente.") + "\n\n")
+			b.WriteString(s.Success.Render("El proceso de backup finalizó exitosamente."))
+			b.WriteString("\n\n")
 		}
 
 		keys := []string{

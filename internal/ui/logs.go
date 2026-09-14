@@ -81,7 +81,8 @@ func (m logsModel) view() string {
 	sub := s.Subtitle.Render("Últimas líneas del log diario (desplazate con las flechas o rueda del mouse)")
 	b.WriteString(fmt.Sprintf("%s  %s\n\n", title, sub))
 
-	b.WriteString(m.viewport.View() + "\n\n")
+	b.WriteString(m.viewport.View())
+	b.WriteString("\n\n")
 
 	keys := []string{
 		fmt.Sprintf("%s %s", s.Key.Render("[Esc/Q]"), s.Desc.Render("Volver al Dashboard")),

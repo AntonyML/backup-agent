@@ -34,10 +34,12 @@ func (m dashboardModel) view() string {
 	title := s.AppTitle.Render("FEMUCARIBE BACKUP AGENT")
 	version := s.Subtitle.Render("v2.2 (Charm TUI)")
 	headerLine := fmt.Sprintf("%s  %s", title, version)
-	b.WriteString(headerLine + "\n\n")
+	b.WriteString(headerLine)
+	b.WriteString("\n\n")
 
 	// Section 1: Backup Status
-	b.WriteString(s.SectionHeader.Render("ESTADO DEL BACKUP") + "\n")
+	b.WriteString(s.SectionHeader.Render("ESTADO DEL BACKUP"))
+	b.WriteString("\n")
 
 	lastRunText := "Nunca ejecutado"
 	if !m.backupStatus.LastRun.IsZero() {
@@ -68,9 +70,11 @@ func (m dashboardModel) view() string {
 	b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Label.Render("Resultado:"), resultText))
 
 	// Section 2: Backends
-	b.WriteString(s.SectionHeader.Render("DESTINOS DE ALMACENAMIENTO") + "\n")
+	b.WriteString(s.SectionHeader.Render("DESTINOS DE ALMACENAMIENTO"))
+	b.WriteString("\n")
 	if len(m.backends) == 0 {
-		b.WriteString(s.Muted.Render("  No hay backends disponibles") + "\n")
+		b.WriteString(s.Muted.Render("  No hay backends disponibles"))
+		b.WriteString("\n")
 	} else {
 		for _, backend := range m.backends {
 			var icon, statusStr string

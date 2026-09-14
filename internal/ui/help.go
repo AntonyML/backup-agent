@@ -128,7 +128,8 @@ func (m helpModel) view() string {
 	tabsLine := fmt.Sprintf("%s   %s   %s   %s\n\n", tabAbout, tabBackup, tabConfig, tabTrouble)
 	b.WriteString(tabsLine)
 
-	b.WriteString(m.viewport.View() + "\n\n")
+	b.WriteString(m.viewport.View())
+	b.WriteString("\n\n")
 
 	keys := []string{
 		fmt.Sprintf("%s %s", s.Key.Render("[Esc/Q]"), s.Desc.Render("Volver al Dashboard")),

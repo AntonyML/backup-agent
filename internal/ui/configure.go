@@ -168,12 +168,15 @@ func (m configureModel) view() string {
 	} else {
 		saveBtn = s.Desc.Render("  " + saveBtn)
 	}
-	b.WriteString(saveBtn + "\n\n")
+	b.WriteString(saveBtn)
+	b.WriteString("\n\n")
 
 	if m.err != nil {
-		b.WriteString(s.Error.Render(fmt.Sprintf("✖ Error: %v", m.err)) + "\n\n")
+		b.WriteString(s.Error.Render(fmt.Sprintf("✖ Error: %v", m.err)))
+		b.WriteString("\n\n")
 	} else if m.success {
-		b.WriteString(s.Success.Render("✔ Credenciales cifradas con Windows DPAPI y guardadas en config.dat con éxito.") + "\n\n")
+		b.WriteString(s.Success.Render("✔ Credenciales cifradas con Windows DPAPI y guardadas en config.dat con éxito."))
+		b.WriteString("\n\n")
 	}
 
 	keys := []string{

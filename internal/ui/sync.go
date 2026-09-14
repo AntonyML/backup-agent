@@ -68,13 +68,16 @@ func (m syncProgressModel) view() string {
 	if m.running {
 		spin := m.spinner.View()
 		b.WriteString(fmt.Sprintf("%s %s\n\n", spin, s.Info.Render("Subiendo backup pendiente a Cloudflare R2...")))
-		b.WriteString(s.Muted.Render("Verificando tamaño y rotación remota...") + "\n\n")
+		b.WriteString(s.Muted.Render("Verificando tamaño y rotación remota..."))
+		b.WriteString("\n\n")
 	} else if m.done {
-		b.WriteString(s.SectionHeader.Render("RESULTADO DE LA SINCRONIZACIÓN") + "\n\n")
+		b.WriteString(s.SectionHeader.Render("RESULTADO DE LA SINCRONIZACIÓN"))
+		b.WriteString("\n\n")
 		if m.err != nil {
 			b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Error.Render("✖ ERROR:"), s.Value.Render(m.err.Error())))
 		} else {
-			b.WriteString(s.Success.Render("✔ Sincronización a Cloudflare R2 completada exitosamente.") + "\n\n")
+			b.WriteString(s.Success.Render("✔ Sincronización a Cloudflare R2 completada exitosamente."))
+			b.WriteString("\n\n")
 		}
 
 		keys := []string{
