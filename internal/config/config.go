@@ -4,9 +4,46 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
+
+// ScheduleConfig define la programación de las tareas automáticas (qué días y a qué hora).
+// Todos los valores son editables desde Ajustes de la TUI; nada queda hardcodeado.
+type ScheduleConfig struct {
+	// Enabled indica si las tareas automáticas (backup/sync) están activas.
+	Enabled bool `json:"enabled"`
+	// Mode define la cadencia: "daily", "weekly" o "interval".
+	Mode string `json:"mode"`
+	// TimeOfDay es la hora de inicio en formato HH:MM (modos daily/weekly).
+	TimeOfDay string `json:"time_of_day"`
+	// Weekdays son los días activos (modo weekly): mon,tue,wed,thu,fri,sat,sun.
+	Weekdays []string `json:"weekdays,omitempty"`
+	// IntervalMinutes es cada cuántos minutos corre la tarea (modo interval).
+	IntervalMinutes int `json:"interval_minutes"`
+	// MaxDurationMin es el tiempo máximo permitido por corrida. 0 = sin límite.
+	MaxDurationMin int `json:"max_duration_minutes"`
+	// TaskName es el nombre de la tarea en el Programador de Windows.
+	TaskName string `json:"task_name"`
+	// SyncAfterBackup indica si tras un backup exitoso se dispara la sincronización remota.
+	SyncAfterBackup bool `json:"sync_after_backup"`
+}
+
+// CloudflareConfig define el destino Cloudflare R2 (cuántas copias se conservan en la nube).
+// Las credenciales (endpoint, bucket, keys) siguen viviendo cifradas en config.dat.
+type CloudflareConfig struct {
+	Enabled       bool `json:"enabled"`
+	Keep          int  `json:"keep"`
+	TimeoutSec    int  `json:"timeout_sec"`
+	UploadRetries int  `json:"upload_retries"`
+}
+
+// ValidWeekdays lista los días aceptados por schedule.weekdays.
+var ValidWeekdays = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+
+// ValidScheduleModes lista los modos aceptados por schedule.mode.
+var ValidScheduleModes = []string{"daily", "weekly", "interval"}
 
 // ServerStorageConfig define la configuración para copia a servidor remoto / recurso compartido.
 type ServerStorageConfig struct {
@@ -44,6 +81,10 @@ type Config struct {
 	RemoteServer ServerStorageConfig `json:"remote_server,omitempty"`
 	// Supabase configura el registro remoto de eventos (Fase 4).
 	Supabase SupabaseConfig `json:"supabase,omitempty"`
+	// Cloudflare configura el destino Cloudflare R2 (rotación en la nube).
+	Cloudflare CloudflareConfig `json:"cloudflare,omitempty"`
+	// Schedule configura día, hora y cantidad de corridas de las tareas.
+	Schedule ScheduleConfig `json:"schedule,omitempty"`
 }
 
 // Default devuelve la configuración de producción FEMUCARIBE.
@@ -66,10 +107,29 @@ func Default() Config {
 			URL:        "",
 			TimeoutSec: 10,
 		},
+		Cloudflare: CloudflareConfig{
+			Enabled:       false,
+			Keep:          10,
+			TimeoutSec:    600,
+			UploadRetries: 3,
+		},
+		Schedule: ScheduleConfig{
+			Enabled:         false,
+			Mode:            "daily",
+			TimeOfDay:       "23:00",
+			Weekdays:        []string{"mon", "tue", "wed", "thu", "fri"},
+			IntervalMinutes: 60,
+			MaxDurationMin:  90,
+			TaskName:        "FEMUCARIBE-Backup-Diario",
+			SyncAfterBackup: true,
+		},
 	}
 }
 
 var dbNameRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+// timeOfDayRe valida HH:MM en formato 24 horas.
+var timeOfDayRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 
 // Load lee config.json. Si no existe, devuelve Default() sin error
 // (primera instalación: convención sobre configuración).
@@ -155,6 +215,104 @@ func (c Config) Validate() error {
 		if c.Supabase.TimeoutSec < 0 {
 			return fmt.Errorf("config: supabase.timeout_sec no puede ser negativo")
 		}
+	}
+	if c.Cloudflare.Enabled {
+		if c.Cloudflare.Keep < 1 {
+			return fmt.Errorf("config: cloudflare.keep debe ser >= 1, recibí %d", c.Cloudflare.Keep)
+		}
+		if c.Cloudflare.TimeoutSec < 0 {
+			return fmt.Errorf("config: cloudflare.timeout_sec no puede ser negativo")
+		}
+		if c.Cloudflare.UploadRetries < 0 {
+			return fmt.Errorf("config: cloudflare.upload_retries no puede ser negativo")
+		}
+	}
+	if err := c.Schedule.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Validate chequea la programación. Los rangos siempre se validan; los campos
+// vacíos solo se rechazan cuando la tarea está habilitada.
+func (s ScheduleConfig) Validate() error {
+	if s.Mode != "" && !contains(ValidScheduleModes, s.Mode) {
+		return fmt.Errorf("config: schedule.mode %q inválido (daily, weekly o interval)", s.Mode)
+	}
+	if s.TimeOfDay != "" && !timeOfDayRe.MatchString(s.TimeOfDay) {
+		return fmt.Errorf("config: schedule.time_of_day %q inválido (formato HH:MM)", s.TimeOfDay)
+	}
+	for _, d := range s.Weekdays {
+		if !contains(ValidWeekdays, strings.ToLower(strings.TrimSpace(d))) {
+			return fmt.Errorf("config: schedule.weekdays contiene %q inválido (mon..sun)", d)
+		}
+	}
+	if s.IntervalMinutes != 0 && s.IntervalMinutes < 5 {
+		return fmt.Errorf("config: schedule.interval_minutes debe ser >= 5, recibí %d", s.IntervalMinutes)
+	}
+	if s.MaxDurationMin < 0 {
+		return fmt.Errorf("config: schedule.max_duration_minutes no puede ser negativo")
+	}
+	if !s.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(s.TaskName) == "" {
+		return fmt.Errorf("config: schedule.task_name es obligatorio cuando la programación está habilitada")
+	}
+	switch s.Mode {
+	case "daily":
+		if s.TimeOfDay == "" {
+			return fmt.Errorf("config: schedule.time_of_day es obligatorio en modo daily")
+		}
+	case "weekly":
+		if s.TimeOfDay == "" {
+			return fmt.Errorf("config: schedule.time_of_day es obligatorio en modo weekly")
+		}
+		if len(s.Weekdays) == 0 {
+			return fmt.Errorf("config: schedule.weekdays no puede estar vacío en modo weekly")
+		}
+	case "interval":
+		if s.IntervalMinutes < 5 {
+			return fmt.Errorf("config: schedule.interval_minutes debe ser >= 5 en modo interval")
+		}
+	}
+	return nil
+}
+
+func contains(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// Save escribe la configuración completa en path de forma atómica (tmp + rename).
+// Valida antes de tocar disco: nunca deja un config.json inconsistente.
+func Save(path string, c Config) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("config: serializar: %w", err)
+	}
+	data = append(data, '\n')
+
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("config: crear %s: %w", dir, err)
+		}
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("config: escribir %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("config: reemplazar %s: %w", path, err)
 	}
 	return nil
 }

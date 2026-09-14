@@ -146,6 +146,7 @@ func BuildDefaultApp(exeDir string, cfgPath string) (*application.App, error) {
 
 	return application.New(application.Options{
 		Config:       cfg,
+		ConfigPath:   cfgPath,
 		StatePath:    statePath,
 		SecretsPath:  datPath,
 		LockPath:     lockPath,

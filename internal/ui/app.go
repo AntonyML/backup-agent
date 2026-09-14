@@ -99,10 +99,19 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenDashboard {
 			switch msg.String() {
 			case "b", "B":
+				// Guarda anti-apilamiento: si ya hay un backup en curso no disparamos
+				// otra goroutine (evita pipelines concurrentes pisándose el lock).
+				if m.backup.running {
+					return m, nil
+				}
 				m.screen = screenBackupProgress
 				startCmd := m.backup.start()
 				return m, tea.Batch(startCmd, runBackupCmd(m.app))
 			case "y", "Y":
+				// Idem para la sincronización remota.
+				if m.sync.running {
+					return m, nil
+				}
 				m.screen = screenSyncProgress
 				startCmd := m.sync.start()
 				return m, tea.Batch(startCmd, runSyncCmd(m.app))

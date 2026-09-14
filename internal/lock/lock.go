@@ -1,14 +1,18 @@
 package lock
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ErrLocked se devuelve cuando otro proceso vivo tiene el lock.
@@ -131,12 +135,36 @@ func pidAlive(pid int) bool {
 	return unixPidAlive(pid)
 }
 
+// tasklistTimeout acota la espera del chequeo de PID: si tasklist se cuelga,
+// el agente no queda esperándolo indefinidamente dentro de Acquire.
+const tasklistTimeout = 5 * time.Second
+
 func windowsPidAlive(pid int) bool {
-	// tasklist existe en todo Windows moderno. Salida CSV entrecomilla el PID:
-	//   "sqlservr.exe","1234","Services","0","..."
-	out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH").Output()
-	if err != nil {
-		return true // conservador: ante error, asumir vivo
-	}
-	return strings.Contains(string(out), `"`+strconv.Itoa(pid)+`"`)
+if pid <= 0 {
+return false
+}
+
+// tasklist existe en todo Windows moderno. Salida CSV entrecomilla el PID:
+//   "sqlservr.exe","1234","Services","0","..."
+ctx, cancel := context.WithTimeout(context.Background(), tasklistTimeout)
+defer cancel()
+
+cmd := exec.CommandContext(ctx, "tasklist",
+"/FI", fmt.Sprintf("PID eq %d", pid),
+"/FO", "CSV", "/NH",
+)
+// Si CommandContext mata el proceso y sus hijos no cierran stdout, WaitDelay
+// fuerza el cierre para no dejar goroutines ni handles colgados.
+cmd.WaitDelay = 2 * time.Second
+
+var out bytes.Buffer
+cmd.Stdout = &out
+cmd.Stderr = io.Discard
+
+if err := cmd.Run(); err != nil {
+// Conservador: ante error, timeout o cancelación asumir vivo
+// (es más seguro no correr duplicado que correr duplicado).
+return true
+}
+return strings.Contains(out.String(), `"`+strconv.Itoa(pid)+`"`)
 }

@@ -70,6 +70,7 @@ type FailpointHook func(point string) error
 // App orquesta los casos de uso del agente sin depender de Cobra ni de flujos de terminal/TTY.
 type App struct {
 	cfg          config.Config
+	configPath   string
 	statePath    string
 	secretsPath  string
 	lockPath     string
@@ -84,6 +85,7 @@ type App struct {
 
 type Options struct {
 	Config       config.Config
+	ConfigPath   string
 	StatePath    string
 	SecretsPath  string
 	LockPath     string
@@ -117,6 +119,7 @@ func New(opts Options) *App {
 	}
 	return &App{
 		cfg:          opts.Config,
+		configPath:   opts.ConfigPath,
 		statePath:    opts.StatePath,
 		secretsPath:  opts.SecretsPath,
 		lockPath:     opts.LockPath,
