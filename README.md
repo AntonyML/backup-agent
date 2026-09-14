@@ -37,14 +37,23 @@ femucaribe-backup-agent/
 │   │   │   └── troubleshooting.md
 │   │   └── ui_test.go
 │   ├── cli/                     # Adaptadores Cobra y launcher TUI
-│   │   ├── root.go              # Comando raíz, detección de TTY y mapeo de Exit Codes
-│   │   ├── backup.go            # Subcomando 'agent backup'
-│   │   ├── sync.go              # Subcomando 'agent sync'
-│   │   ├── status.go            # Subcomando 'agent status'
-│   │   ├── logs.go              # Subcomando 'agent logs'
-│   │   ├── configure.go         # Subcomando 'agent configure'
+│   │   ├── root.go              # Comando raíz, flags persistentes (--config, --profile) y Exit Codes
+│   │   ├── backup.go            # Subcomando 'backup' (--unattended, --force, --profile)
+│   │   ├── sync.go              # Subcomando 'sync' (reintento de R2, UNC y Supabase)
+│   │   ├── status.go            # Subcomando 'status'
+│   │   ├── logs.go              # Subcomando 'logs'
+│   │   ├── doctor.go            # Subcomando 'doctor' (diagnóstico no destructivo de salud)
+│   │   ├── profile.go           # Subcomando 'profile' (list, show, use)
+│   │   ├── schedule.go          # Subcomando 'schedule' (install, update, remove, status con degradación D7)
+│   │   ├── config.go            # Subcomando 'config validate'
+│   │   ├── configure.go         # Subcomando 'configure'
 │   │   ├── interactive.go       # Launcher de Bubble Tea (tea.NewProgram)
 │   │   └── cli_test.go
+│   ├── scheduler/               # Integración con Windows Task Scheduler (schtasks.exe)
+│   │   ├── manager.go           # Operaciones schtasks (Install, Update, Delete, Status)
+│   │   ├── spec.go              # Mapeo de triggers (daily, weekly, interval) y comando de elevación D7
+│   │   ├── task_xml.go          # Generación de XML de tarea con ExecutionTimeLimit e IgnoreNew
+│   │   └── status.go            # Consulta y parseo resiliente de estados en Windows (EN/ES)
 │   ├── application/             # Casos de uso de negocio (100% desacoplados de Cobra, TUI y TTY)
 │   │   ├── app.go               # Orquestador del ciclo de vida y buffering de eventos
 │   │   ├── backup.go            # Pipeline completo de backup y emisión de eventos operacionales
@@ -64,14 +73,14 @@ femucaribe-backup-agent/
 │   │   ├── r2/                  # Backend de Cloudflare R2 (S3 compatible)
 │   │   └── server/              # Backend para servidor remoto Windows / UNC (Fase 3)
 │   ├── secrets/                 # Cifrado DPAPI (Windows) y gestión de config.dat
-│   │   ├── logging/             # Logging estructurado con log/slog y rotación diaria
-│   │   ├── config/              # Carga y validación de config.json
-│   │   ├── state/               # Persistencia atómica de estado en state.json
-│   │   ├── lock/                # Exclusión mutua (agent.lock con PID) y detección de huérfanos
-│   │   ├── hasher/              # Hash SHA-256 por streaming
-│   │   ├── rotation/            # Algoritmo de retención y poda de backups locales
-│   │   ├── sqlbackup/           # Operaciones directas sobre SQL Server (go-mssqldb)
-│   │   └── version/             # Información de versión del binario (v4.0.0)
+│   ├── logging/                 # Logging estructurado con log/slog y rotación diaria
+│   ├── config/                  # Carga, validación y gestión de perfiles en config.json
+│   ├── state/                   # Persistencia atómica de estado en state.json
+│   ├── lock/                    # Exclusión mutua por perfil (agent-<perfil>.lock) y detección de huérfanos
+│   ├── hasher/                  # Hash SHA-256 por streaming
+│   ├── rotation/                # Algoritmo de retención y poda de backups locales
+│   ├── sqlbackup/               # Operaciones directas sobre SQL Server (go-mssqldb)
+│   └── version/                 # Información de versión del binario (v4.0.0)
 │   ├── supabase/                # Configuración y migraciones oficiales de Supabase CLI
 │   │   ├── config.toml          # Configuración del proyecto local/remoto
 │   │   └── migrations/          # Migraciones SQL versionadas
@@ -105,7 +114,7 @@ El agente busca junto al binario:
 | `config.json` | JSON (texto)   | Parámetros locales y remotos: `backup_dir`, `server`, `database`, `retain` (local, default 3), `remote_server` (`enabled`, `remote_path`, `keep` default 10, `timeout_sec`), `supabase` (`enabled`, `url`, `timeout_sec`). |
 | `config.dat`  | Binario cifrado| Credenciales de R2 cifradas con Windows DPAPI: Endpoint, Bucket, Access Key, Secret Key. |
 | `state.json`  | JSON (texto)   | Estado persistente: `last_run_date`, `last_backup_file`, `sha256`, `pending_sync` (`r2`, `server`), `r2_last_synced_file`, `server_last_synced_file`, `pending_events` (eventos de Supabase en buffer resiliente). |
-| `agent.lock`  | Texto con PID  | Lock file para evitar ejecuciones concurrentes y reclamar instancias muertas. |
+| `agent-<perfil>.lock` | Texto con PID  | Lock file por perfil para evitar ejecuciones concurrentes del mismo perfil sin bloquear otros perfiles. |
 | `logs/`       | Directorio     | Archivos de log rotativos diarios: `agent-YYYY-MM-DD.log`. |
 
 ### Variables de Entorno (Credenciales de Supabase)
@@ -177,11 +186,161 @@ Al ejecutar `backup-agent.exe` en una consola o terminal interactiva (o mediante
 
 ## Subcomandos para Automatización y Scripts
 
-#### 1. Ejecutar Backup (`backup`)
+### Flag Persistente `--profile`
+
+Todos los subcomandos aceptan el flag persistente `--profile <nombre>` (heredado del comando raíz):
+- Si no se especifica `--profile`, el agente utiliza el perfil activo (`active_profile`) definido en `config.json` (por defecto `"full"`).
+- Cada perfil cuenta con su propio archivo de exclusión mutua (`agent-<perfil>.lock`), permitiendo que ejecuciones de perfiles diferentes convivan sin bloquearse mutuamente.
+- **Validación estricta (Exit Code 2)**: Si se especifica un perfil que no existe en `config.json`, el agente aborta de inmediato con código de salida **`2`** (`ExitConfigErr`), listando los perfiles disponibles.
 
 ```powershell
-# Modo normal: respeta la idempotencia diaria (si ya corrió hoy, sale con código 0)
+# Ejecutar backup bajo un perfil específico
+.\bin\backup-agent.exe backup --profile diario-r2 --unattended
+
+# Diagnosticar un perfil específico
+.\bin\backup-agent.exe doctor --profile full
+
+# Si el perfil no existe, devuelve exit code 2:
+.\bin\backup-agent.exe backup --profile inexistente
+# Error: error de configuración: el perfil "inexistente" no existe (disponibles: full, diario-r2)
+# Exit Code: 2
+```
+
+---
+
+#### 1. Gestión de Perfiles de Backup (`profile`)
+
+Permite listar, inspeccionar y activar perfiles configurados en `config.json`. El destino local (`C:\Backups\`) está siempre implícito; cada perfil define qué plataformas remotas adicionales (`r2`, `server`) reciben el backup y cuál es su programación.
+
+- **`profile list`**: Lista todos los perfiles configurados, destacando el activo con `*` y resumiendo tipo, plataformas y schedule:
+  ```powershell
+  .\bin\backup-agent.exe profile list
+  ```
+  *Salida de ejemplo:*
+  ```text
+  === Perfiles de backup ===
+  * full             kind=custom   plataformas=r2, server                       schedule=diario a las 23:00
+    ligero           kind=custom   plataformas=solo local                       schedule=cada 60 min
+
+  Perfil activo: full
+  ```
+
+- **`profile show [nombre]`**: Muestra el detalle exhaustivo de un perfil (tipo, plataformas, schedule efectivo, herencia global, nombre de tarea de Windows y overrides de R2/UNC). Si se omite el argumento, muestra el perfil activo o el provisto vía `--profile`:
+  ```powershell
+  .\bin\backup-agent.exe profile show full
+  ```
+  *Salida de ejemplo:*
+  ```text
+  === Perfil full ===
+  Tipo (kind):       custom
+  Plataformas:       local, r2, server
+  Schedule:          diario a las 23:00
+  Hereda del global: true
+  Tarea Windows:     FEMUCARIBE-Backup-full
+  ```
+
+- **`profile use <nombre>`**: Establece un perfil como el `active_profile` en `config.json` de forma atómica y persistente. Valida que el perfil exista (exit code 2 si no existe):
+  ```powershell
+  .\bin\backup-agent.exe profile use ligero
+  # Perfil activo cambiado a "ligero" (guardado en C:\Agente\config.json).
+  ```
+
+---
+
+#### 2. Diagnóstico de Salud y Conectividad (`doctor`)
+
+Ejecuta una batería de comprobaciones **no destructivas** sobre el perfil especificado (o el activo) para validar la salud del entorno antes de un backup o tras cambios de red:
+
+```powershell
+# Diagnosticar el perfil activo
+.\bin\backup-agent.exe doctor
+
+# Diagnosticar un perfil específico
+.\bin\backup-agent.exe doctor --profile full
+```
+
+*Verificaciones realizadas:*
+1. **SQL Server**: Conectividad a la instancia, versión de SQL Server y existencia de la base de datos `CONTABILIDAD`.
+2. **Directorio Local**: Existencia de `backup_dir` (`C:\Backups\`), permisos de lectura/escritura y espacio libre disponible en disco.
+3. **Cloudflare R2**: Conectividad HTTP/S3, bucket accesible y permisos de escritura (si R2 está habilitado en el perfil).
+4. **Servidor Remoto (UNC)**: Accesibilidad de la ruta de red `\\ServidorBackup\Backups\`, permisos de escritura y espacio (si UNC está habilitado en el perfil).
+5. **Supabase**: Conectividad HTTPS a la API PostgREST y validación de API Key (si está habilitado).
+6. **Tarea de Windows**: Estado de la tarea programada asociada al perfil (`Ready`, `Running`, `Disabled` o `no instalada`).
+
+*Salida de ejemplo:*
+```text
+=== Doctor · perfil full ===
+
+  ✔ SQL Server       Conectado a Caproba01\vbadilla (CONTABILIDAD)
+  ✔ Almacén Local    C:\Backups\ (OK · 128 GB disponibles)
+  ✔ Cloudflare R2    femucaribe-backups (OK)
+  ✔ Servidor Remoto  \\ServidorBackup\Backups\CONTABILIDAD\ (OK)
+  ✔ Supabase         https://oxpxyiucnzpedawwkosy.supabase.co (OK)
+  ✔ Tarea Windows    FEMUCARIBE-Backup-full (Ready)
+
+Todo en orden.
+```
+
+---
+
+#### 3. Gestión de Tareas en Windows Task Scheduler (`schedule`) y Degradación D7
+
+Administra de forma automatizada las tareas programadas de Windows para cada perfil utilizando el ejecutable oficial `schtasks.exe` y definiciones XML enriquecidas. Esto permite registrar configuraciones avanzadas que la interfaz estándar de `schtasks /Create` no permite directamente (como límites de tiempo de ejecución `ExecutionTimeLimit` / `max_duration_min` y política anti-solapamiento `MultipleInstancesPolicy=IgnoreNew`).
+
+- **`schedule install`**: Registra la tarea programada para el perfil en Windows Task Scheduler (con acción `backup --unattended --profile <nombre>`):
+  ```powershell
+  .\bin\backup-agent.exe schedule install
+  .\bin\backup-agent.exe schedule install --profile diario-r2
+  ```
+
+- **`schedule update`**: Actualiza o reinstala la tarea existente aplicando los cambios de programación más recientes definidos en `config.json`:
+  ```powershell
+  .\bin\backup-agent.exe schedule update
+  ```
+
+- **`schedule remove`**: Elimina la tarea del perfil en Windows Task Scheduler:
+  ```powershell
+  .\bin\backup-agent.exe schedule remove
+  ```
+
+- **`schedule status`**: Consulta el estado de las tareas de Windows de todos los perfiles configurados (o de uno en específico con `--profile`):
+  ```powershell
+  .\bin\backup-agent.exe schedule status
+  ```
+  *Salida de ejemplo:*
+  ```text
+  === Estado de tareas de Windows ===
+  * full             tarea=FEMUCARIBE-Backup-full         estado=Ready
+    ligero           tarea=FEMUCARIBE-Backup-ligero       estado=NO INSTALADA
+  ```
+
+##### Mecanismo de Degradación D7 (Elevación sin Errores Crudos)
+
+Modificar el Programador de Tareas de Windows requiere privilegios elevados (**Run as Administrator**). Si el operador ejecuta `schedule install`, `update` o `remove` desde una terminal sin permisos de administrador:
+
+1. El agente **no falla abruptamente ni arroja un error crudo de Win32**.
+2. Vuelca de manera segura el XML de la tarea en `%TEMP%\FEMUCARIBE-Backup-<perfil>.xml`.
+3. Informa de manera amigable al operador y muestra el **comando exacto listo para copiar y pegar** en una consola elevada:
+   ```text
+   Se requiere permiso de administrador para gestionar la tarea.
+   Ejecutá este comando en una consola elevada (copiar y pegar):
+
+       schtasks /Create /TN "FEMUCARIBE-Backup-full" /XML "%TEMP%\FEMUCARIBE-Backup-FEMUCARIBE-Backup-full.xml" /F
+
+   El agente sigue operativo: solo quedó sin registrar/actualizar la tarea.
+   ```
+4. El proceso termina de forma limpia con código `0`, garantizando que la falta de permisos de scheduler no interrumpa flujos de trabajo mayores.
+
+---
+
+#### 4. Ejecutar Backup (`backup`)
+
+```powershell
+# Modo normal: respeta la idempotencia diaria para el perfil activo
 .\bin\backup-agent.exe backup
+
+# Ejecutar un perfil específico
+.\bin\backup-agent.exe backup --profile diario-r2
 
 # Modo desatendido para Task Scheduler (garantiza cero prompts o lectura de stdin)
 .\bin\backup-agent.exe backup --unattended
@@ -193,11 +352,16 @@ Al ejecutar `backup-agent.exe` en una consola o terminal interactiva (o mediante
 .\bin\backup-agent.exe backup --config C:\soporte\config.custom.json --force
 ```
 
-#### 2. Sincronización Remota de Pendientes (`sync`)
+---
+
+#### 5. Sincronización Remota de Pendientes (`sync`)
 
 ```powershell
-# Sube a R2 el backup pendiente registrado en state.json si hubo fallos de red previos
+# Sube a R2/UNC el backup pendiente registrado en state.json si hubo fallos de red previos
 .\bin\backup-agent.exe sync
+
+# Sincronizar bajo un perfil específico
+.\bin\backup-agent.exe sync --profile full
 
 # Modo desatendido
 .\bin\backup-agent.exe sync --unattended
@@ -206,13 +370,32 @@ Al ejecutar `backup-agent.exe` en una consola o terminal interactiva (o mediante
 .\bin\backup-agent.exe sync --force
 ```
 
-#### 3. Consultar Estado (`status`)
+---
+
+#### 6. Validación de Configuración (`config validate`)
+
+Permite validar la sintaxis y coherencia de `config.json` (perfiles, plataformas, schedules válidos y overrides) sin iniciar procesos de backup ni locks:
 
 ```powershell
+.\bin\backup-agent.exe config validate
+```
+*Salida:* Devuelve código `0` si la configuración es íntegra y válida; devuelve código **`2`** (`ExitConfigErr`) con el detalle del error si algún parámetro es incorrecto.
+
+---
+
+#### 7. Consultar Estado (`status`)
+
+```powershell
+# Estado consolidado del perfil activo
 .\bin\backup-agent.exe status
+
+# Estado consolidado de un perfil específico
+.\bin\backup-agent.exe status --profile diario-r2
 ```
 
-#### 4. Consultar Logs Recientes (`logs`)
+---
+
+#### 8. Consultar Logs Recientes (`logs`)
 
 ```powershell
 # Muestra las últimas 20 líneas del log del día (default)
@@ -222,9 +405,12 @@ Al ejecutar `backup-agent.exe` en una consola o terminal interactiva (o mediante
 .\bin\backup-agent.exe logs -n 50
 ```
 
-#### 5. Configuración por Consola (`configure`)
+---
+
+#### 9. Configuración por Consola (`configure`)
 
 ```powershell
+# Configuración interactiva de credenciales Cloudflare R2 con DPAPI
 .\bin\backup-agent.exe configure
 ```
 
@@ -236,9 +422,9 @@ Al ejecutar `backup-agent.exe` en una consola o terminal interactiva (o mediante
 |:------:|-------------------|-------------|
 | **`0`** | `ExitOK`          | Operación completada con éxito o backup ya realizado el día de hoy (idempotencia). |
 | **`1`** | `ExitGeneralErr`  | Error general de ejecución (fallo en SQL, error de I/O, sin TTY en comando raíz). |
-| **`2`** | `ExitConfigErr`   | Configuración inválida, faltante o sintaxis corrupta (`config.json`). |
+| **`2`** | `ExitConfigErr`   | Configuración inválida, faltante, sintaxis corrupta (`config.json`), o perfil inexistente especificado con `--profile` o `active_profile`. |
 | **`3`** | `ExitPendingSync` | Backup local creado y verificado con éxito, pero la transferencia remota (R2 o Servidor Remoto UNC) falló o quedó diferida en `pending_sync`. |
-| **`4`** | `ExitLocked`      | Otra instancia del agente se encuentra en ejecución (`agent.lock` activo con PID vivo). |
+| **`4`** | `ExitLocked`      | Otra instancia del agente se encuentra en ejecución para el mismo perfil (`agent-<perfil>.lock` activo con PID vivo). |
 
 ---
 
@@ -450,17 +636,44 @@ Acceder al Table Editor en la consola web de Supabase para visualizar gráficos 
 
 ## Configuración en Windows Task Scheduler
 
-Para la ejecución desatendida en producción:
+Para la ejecución desatendida en producción, el agente ofrece dos vías de despliegue:
+
+### 1. Despliegue Automatizado vía CLI (Recomendado)
+
+El subcomando `schedule install` genera una definición XML robusta y la registra directamente en Windows Task Scheduler utilizando `schtasks.exe`:
+
+```powershell
+# Registrar la tarea del perfil activo (ejecutar en PowerShell como Administrador)
+.\bin\backup-agent.exe schedule install
+
+# Registrar la tarea para un perfil específico
+.\bin\backup-agent.exe schedule install --profile diario-r2
+```
+
+**Ventajas de la definición XML generada por el agente:**
+- **Prevención de Solapamiento:** Fija `MultipleInstancesPolicy = IgnoreNew`, evitando que se lance un segundo backup si el anterior aún continúa en ejecución.
+- **Límite de Tiempo de Ejecución:** Fija `ExecutionTimeLimit` en base a `max_duration_min` para impedir que procesos congelados consuman recursos indefinidamente.
+- **Disparadores Precisos:** Soporta modos `daily` (diario a una hora fija), `weekly` (días seleccionados de la semana) e `interval` (cada *N* minutos).
+- **Acción Desatendida:** Configura la acción automáticamente como `backup --unattended --profile <nombre>` apuntando al ejecutable del agente.
+- **Degradación D7:** Si la consola no posee privilegios elevados, el agente entrega el comando exacto `schtasks /Create /TN ... /XML ... /F` para elevar sin fallos crudos.
+
+---
+
+### 2. Configuración Manual mediante la Interfaz Gráfica (`taskschd.msc`)
+
+Si se prefiere crear la tarea manualmente desde la GUI de Windows:
 
 1. **Acción:** `Iniciar un programa`
    - **Programa o script:** `C:\Agente\backup-agent.exe`
-   - **Agregar argumentos:** `backup --unattended`
+   - **Agregar argumentos:** `backup --unattended --profile full`
    - **Iniciar en:** `C:\Agente\`
 2. **Disparadores (Triggers):**
-   - Disparador programado diario (ej: `23:00`).
-   - Disparador al iniciar el sistema (*At startup*) con retraso de 5 a 10 minutos para asegurar que SQL Server esté en línea.
-3. **Seguridad:**
-   - Cuenta de servicio con permisos en SQL Server y DPAPI.
+   - Disparador programado según el schedule requerido (ej: diario a las `23:00`).
+   - Disparador al iniciar el sistema (*At startup*) opcional con retraso de 5 a 10 minutos para asegurar que SQL Server esté en línea.
+3. **Condiciones y Configuración:**
+   - Activar *"Ejecutar tanto si el usuario inició sesión como si no"*.
+   - Marcar *"Ejecutar con los privilegios más altos"* si la cuenta lo requiere.
+   - Cuenta de servicio con permisos en SQL Server, sistema de archivos local y DPAPI.
 
 ### Monitoreo de Logs en Vivo
 
