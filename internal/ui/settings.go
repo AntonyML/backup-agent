@@ -336,6 +336,19 @@ func (m *settingsModel) scheduleFields() []settingsField {
 				return nil
 			},
 		},
+		{
+			Label: "Programación activa", Kind: kindBool, Options: boolOptions(),
+			Help: "Habilita o deshabilita la ejecución programada automática en Windows.",
+			Get:  func(s application.Settings) string { return strconv.FormatBool(s.Schedule.Enabled) },
+			Set: func(s *application.Settings, v string) error {
+				b, err := parseBool(v)
+				if err != nil {
+					return err
+				}
+				s.Schedule.Enabled = b
+				return nil
+			},
+		},
 	}
 }
 
@@ -1151,6 +1164,13 @@ func (m *settingsModel) installWindowsTask() {
 		if err != nil {
 			m.err = err
 			return
+		}
+		if !m.cfg.Schedule.Enabled {
+			m.cfg.Schedule.Enabled = true
+			m.dirty = true
+			if m.app != nil {
+				_ = m.app.SaveSettings(m.cfg)
+			}
 		}
 		spec, err := scheduler.SpecForProfile(m.cfg, m.cfg.ActiveProfile, exePath)
 		if err != nil {
