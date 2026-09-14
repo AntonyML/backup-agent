@@ -228,6 +228,9 @@ func ExitCodeForError(err error) int {
 
 // Execute inicializa y corre el CLI devolviendo el exit code correspondiente.
 func Execute() int {
+	cleanup := initConsoleEncoding()
+	defer cleanup()
+
 	dir := exeDir()
 	cmd := NewRootCmd(dir, func(cfgPath, profile string) (*application.App, error) {
 		return BuildDefaultApp(dir, cfgPath, profile)

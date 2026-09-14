@@ -1,4 +1,4 @@
-﻿package application
+package application
 
 import (
 	"context"
@@ -78,7 +78,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 		syncCancel()
 		if err != nil {
 			hadError = true
-			a.logger.Error("fallÃ³ sincronizaciÃ³n a backend", "backend", b.Name(), "error", err)
+			a.logger.Error("falló sincronización a backend", "backend", b.Name(), "error", err)
 			failType := events.TypeR2SyncFailed
 			if isServer {
 				failType = events.TypeServerSyncFailed
@@ -97,7 +97,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 				AgentVersion: version.Current,
 			})
 		} else {
-			a.logger.Info("sincronizaciÃ³n exitosa", "backend", b.Name())
+			a.logger.Info("sincronización exitosa", "backend", b.Name())
 			completedType := events.TypeR2SyncCompleted
 			if isServer {
 				completedType = events.TypeServerSyncCompleted

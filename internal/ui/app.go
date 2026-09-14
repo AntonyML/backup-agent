@@ -36,7 +36,7 @@ type AppModel struct {
 	height    int
 }
 
-// NewApp crea el modelo raÃ­z de Bubble Tea para la interfaz TUI.
+// NewApp crea el modelo raíz de Bubble Tea para la interfaz TUI.
 func NewApp(app AppConnector, exeDir string) AppModel {
 	styles := DefaultStyles()
 

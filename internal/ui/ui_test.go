@@ -288,3 +288,61 @@ func TestSettings_IntegrationFlow(t *testing.T) {
 		t.Fatalf("esperaba volver a screenDashboard, dio %v", appModel.screen)
 	}
 }
+
+func TestSettings_CreateProfileDev(t *testing.T) {
+	initialSettings := application.Settings{
+		ActiveProfile: "full",
+		Profiles: []application.Profile{
+			{Name: "full", Kind: application.KindFull},
+		},
+		Schedule: application.ScheduleConfig{
+			Enabled: true, Mode: "daily", TimeOfDay: "12:00",
+		},
+	}
+	mock := &mockAppConnector{settings: initialSettings}
+	appModel := NewApp(mock, t.TempDir())
+	keyPress := func(key string) tea.KeyPressMsg {
+		return tea.KeyPressMsg{Code: []rune(key)[0], Text: key}
+	}
+
+	// 1. Enter settings with 'c'
+	m, _ := appModel.Update(keyPress("c"))
+	appModel = m.(AppModel)
+
+	// 2. Enter Perfiles (group 0) with enter
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+
+	// 3. Press 'n' to create new profile
+	m, _ = appModel.Update(keyPress("n"))
+	appModel = m.(AppModel)
+
+	if !appModel.settings.prompting {
+		t.Fatalf("expected prompting = true after pressing 'n'")
+	}
+
+	// 4. Type 'd', 'e', 'v'
+	m, _ = appModel.Update(keyPress("d"))
+	appModel = m.(AppModel)
+	t.Logf("after 'd', value: %q", appModel.settings.input.Value())
+	m, _ = appModel.Update(keyPress("e"))
+	appModel = m.(AppModel)
+	t.Logf("after 'e', value: %q", appModel.settings.input.Value())
+	m, _ = appModel.Update(keyPress("v"))
+	appModel = m.(AppModel)
+	t.Logf("after 'v', value: %q", appModel.settings.input.Value())
+
+	// 5. Press Enter to confirm
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+
+	t.Logf("prompting: %v, err: %v, notice: %v, profiles: %d",
+		appModel.settings.prompting, appModel.settings.err, appModel.settings.notice, len(appModel.settings.cfg.Profiles))
+	if appModel.settings.err != nil {
+		t.Errorf("unexpected error: %v", appModel.settings.err)
+	}
+	if len(appModel.settings.cfg.Profiles) != 2 {
+		t.Errorf("expected 2 profiles, got %d", len(appModel.settings.cfg.Profiles))
+	}
+}
+

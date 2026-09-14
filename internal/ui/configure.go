@@ -85,7 +85,7 @@ func (m configureModel) update(msg tea.Msg) (configureModel, tea.Cmd) {
 				m.focused++
 				return m, m.updateFocus()
 			}
-			// En el Ãºltimo campo o botÃ³n guardar: guardar
+			// En el último campo o botón guardar: guardar
 			m.save()
 			return m, nil
 		}
@@ -115,7 +115,7 @@ func (m *configureModel) updateFocus() tea.Cmd {
 
 func (m *configureModel) save() {
 	if m.app == nil {
-		m.err = fmt.Errorf("no hay instancia de aplicaciÃ³n conectada")
+		m.err = fmt.Errorf("no hay instancia de aplicación conectada")
 		return
 	}
 
@@ -138,7 +138,7 @@ func (m configureModel) view() string {
 	s := m.styles
 	var b strings.Builder
 
-	title := s.AppTitle.Render("CONFIGURACIÃ“N DE CREDENCIALES (R2)")
+	title := s.AppTitle.Render("CONFIGURACIÓN DE CREDENCIALES (R2)")
 	sub := s.Subtitle.Render("Los secretos se cifran con Windows DPAPI en config.dat")
 	b.WriteString(fmt.Sprintf("%s  %s\n\n", title, sub))
 
@@ -152,7 +152,7 @@ func (m configureModel) view() string {
 	for i := 0; i < 4; i++ {
 		labelStr := labels[i]
 		if i == m.focused {
-			labelStr = s.InputPrompt.Render("â–¶ " + labelStr)
+			labelStr = s.InputPrompt.Render("▶ " + labelStr)
 		} else {
 			labelStr = s.Label.Render("  " + labelStr)
 		}
@@ -160,10 +160,10 @@ func (m configureModel) view() string {
 		b.WriteString(fmt.Sprintf("%s\n  %s\n\n", labelStr, m.inputs[i].View()))
 	}
 
-	// BotÃ³n guardar
+	// Botón guardar
 	saveBtn := "[ Guardar Credenciales ]"
 	if m.focused == 4 {
-		saveBtn = s.AppTitle.Render("â–¶ " + saveBtn)
+		saveBtn = s.AppTitle.Render("▶ " + saveBtn)
 	} else {
 		saveBtn = s.Desc.Render("  " + saveBtn)
 	}
@@ -171,10 +171,10 @@ func (m configureModel) view() string {
 	b.WriteString("\n\n")
 
 	if m.err != nil {
-		b.WriteString(s.Error.Render(fmt.Sprintf("âœ– Error: %v", m.err)))
+		b.WriteString(s.Error.Render(fmt.Sprintf("✖ Error: %v", m.err)))
 		b.WriteString("\n\n")
 	} else if m.success {
-		b.WriteString(s.Success.Render("âœ” Credenciales cifradas con Windows DPAPI y guardadas en config.dat con Ã©xito."))
+		b.WriteString(s.Success.Render("✔ Credenciales cifradas con Windows DPAPI y guardadas en config.dat con éxito."))
 		b.WriteString("\n\n")
 	}
 

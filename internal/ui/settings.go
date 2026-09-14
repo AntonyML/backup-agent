@@ -94,7 +94,22 @@ type openCredentialsMsg struct{}
 // backToDashboardMsg indica volver al dashboard principal.
 type backToDashboardMsg struct{}
 
-type confirmAction func()
+type promptKind int
+
+const (
+	promptNone promptKind = iota
+	promptNewProfile
+	promptRenameProfile
+)
+
+type confirmKind int
+
+const (
+	confirmNone confirmKind = iota
+	confirmDeleteProfile
+	confirmDeleteWindowsTask
+	confirmInstallWindowsTask
+)
 
 // settingsModel coordina toda la navegación y edición de Ajustes.
 type settingsModel struct {
@@ -106,16 +121,16 @@ type settingsModel struct {
 	fieldIdx int
 	subIdx   int
 
-	editing       bool
-	input         textinput.Model
-	multi         *multiselect
-	confirm       *confirmModel
-	confirmAction confirmAction
+	editing     bool
+	input       textinput.Model
+	multi       *multiselect
+	confirm     *confirmModel
+	confirmType confirmKind
 
 	// Modo prompt para ingresar texto libre (crear / renombrar perfil)
-	prompting    bool
-	promptTitle  string
-	promptAction func(string)
+	prompting   bool
+	promptTitle string
+	promptType  promptKind
 
 	dirty  bool
 	saved  bool
@@ -250,8 +265,9 @@ func (m *settingsModel) load() {
 	m.subIdx = 0
 	m.editing = false
 	m.prompting = false
+	m.promptType = promptNone
 	m.confirm = nil
-	m.confirmAction = nil
+	m.confirmType = confirmNone
 	m.multi = nil
 	m.dirty = false
 	m.saved = false
@@ -805,19 +821,16 @@ func (m *settingsModel) update(msg tea.Msg) (*settingsModel, tea.Cmd) {
 			m.confirm.move()
 			return m, nil
 		case "enter":
-			if m.confirm.ok && m.confirmAction != nil {
-				action := m.confirmAction
-				m.confirm = nil
-				m.confirmAction = nil
-				action()
+			if m.confirm.ok {
+				m.finishConfirm()
 				return m, nil
 			}
 			m.confirm = nil
-			m.confirmAction = nil
+			m.confirmType = confirmNone
 			return m, nil
 		case "esc":
 			m.confirm = nil
-			m.confirmAction = nil
+			m.confirmType = confirmNone
 			return m, nil
 		}
 		return m, nil
@@ -828,16 +841,14 @@ func (m *settingsModel) update(msg tea.Msg) (*settingsModel, tea.Cmd) {
 		switch key.String() {
 		case "esc":
 			m.prompting = false
+			m.promptType = promptNone
 			m.input.Blur()
 			return m, nil
 		case "enter":
 			val := strings.TrimSpace(m.input.Value())
-			action := m.promptAction
 			m.prompting = false
 			m.input.Blur()
-			if action != nil {
-				action(val)
-			}
+			m.finishPrompt(val)
 			return m, nil
 		default:
 			var cmd tea.Cmd
@@ -1203,29 +1214,87 @@ func (m *settingsModel) useActiveProfile() {
 
 func (m *settingsModel) startNewProfilePrompt() {
 	m.prompting = true
+	m.promptType = promptNewProfile
 	m.promptTitle = "Nombre del nuevo perfil:"
 	m.input.SetValue("")
 	m.input.Focus()
-	m.promptAction = func(name string) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			m.err = fmt.Errorf("el nombre del perfil no puede estar vacío")
-			return
-		}
-		if _, ok := m.cfg.ProfileByName(name); ok {
-			m.err = fmt.Errorf("ya existe un perfil con el nombre %q", name)
-			return
-		}
-		newP := application.Profile{
-			Name:      name,
-			Kind:      application.KindFull,
-			Platforms: m.cfg.EnabledPlatforms(),
-		}
-		m.cfg.Profiles = append(m.cfg.Profiles, newP)
-		m.fieldIdx = len(m.cfg.Profiles) - 1
-		m.dirty = true
-		m.save()
+}
+
+func (m *settingsModel) startRenameProfilePrompt() {
+	if m.fieldIdx < 0 || m.fieldIdx >= len(m.cfg.Profiles) {
+		return
+	}
+	cur := m.cfg.Profiles[m.fieldIdx].Name
+	m.prompting = true
+	m.promptType = promptRenameProfile
+	m.promptTitle = fmt.Sprintf("Nuevo nombre para el perfil %q:", cur)
+	m.input.SetValue(cur)
+	m.input.Focus()
+}
+
+func (m *settingsModel) finishPrompt(val string) {
+	switch m.promptType {
+	case promptNewProfile:
+		m.createProfile(val)
+	case promptRenameProfile:
+		m.renameProfile(val)
+	}
+	m.promptType = promptNone
+	m.updateViewportContent()
+}
+
+func (m *settingsModel) createProfile(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		m.err = fmt.Errorf("el nombre del perfil no puede estar vacío")
+		return
+	}
+	if _, ok := m.cfg.ProfileByName(name); ok {
+		m.err = fmt.Errorf("ya existe un perfil con el nombre %q", name)
+		return
+	}
+
+	platforms := m.cfg.EnabledPlatforms()
+	kind := application.KindFull
+	if strings.EqualFold(name, "dev") && len(platforms) == 1 {
+		kind = application.KindDev
+	}
+
+	newP := application.Profile{
+		Name:      name,
+		Kind:      kind,
+		Platforms: platforms,
+	}
+	m.cfg.Profiles = append(m.cfg.Profiles, newP)
+	m.fieldIdx = len(m.cfg.Profiles) - 1
+	m.dirty = true
+	m.save()
+	if m.err == nil {
 		m.notice = fmt.Sprintf("Perfil %q creado correctamente.", name)
+	}
+}
+
+func (m *settingsModel) renameProfile(newName string) {
+	if m.fieldIdx < 0 || m.fieldIdx >= len(m.cfg.Profiles) {
+		return
+	}
+	cur := m.cfg.Profiles[m.fieldIdx].Name
+	newName = strings.TrimSpace(newName)
+	if newName == "" || newName == cur {
+		return
+	}
+	if _, ok := m.cfg.ProfileByName(newName); ok {
+		m.err = fmt.Errorf("ya existe un perfil con el nombre %q", newName)
+		return
+	}
+	m.cfg.Profiles[m.fieldIdx].Name = newName
+	if m.cfg.ActiveProfile == cur {
+		m.cfg.ActiveProfile = newName
+	}
+	m.dirty = true
+	m.save()
+	if m.err == nil {
+		m.notice = fmt.Sprintf("Perfil renombrado a %q.", newName)
 	}
 }
 
@@ -1242,34 +1311,7 @@ func (m *settingsModel) duplicateProfile() {
 	m.dirty = true
 	m.save()
 	m.notice = fmt.Sprintf("Perfil %q duplicado como %q.", src.Name, newName)
-}
-
-func (m *settingsModel) startRenameProfilePrompt() {
-	if m.fieldIdx < 0 || m.fieldIdx >= len(m.cfg.Profiles) {
-		return
-	}
-	cur := m.cfg.Profiles[m.fieldIdx].Name
-	m.prompting = true
-	m.promptTitle = fmt.Sprintf("Nuevo nombre para el perfil %q:", cur)
-	m.input.SetValue(cur)
-	m.input.Focus()
-	m.promptAction = func(newName string) {
-		newName = strings.TrimSpace(newName)
-		if newName == "" || newName == cur {
-			return
-		}
-		if _, ok := m.cfg.ProfileByName(newName); ok {
-			m.err = fmt.Errorf("ya existe un perfil con el nombre %q", newName)
-			return
-		}
-		m.cfg.Profiles[m.fieldIdx].Name = newName
-		if m.cfg.ActiveProfile == cur {
-			m.cfg.ActiveProfile = newName
-		}
-		m.dirty = true
-		m.save()
-		m.notice = fmt.Sprintf("Perfil renombrado a %q.", newName)
-	}
+	m.updateViewportContent()
 }
 
 func (m *settingsModel) deleteProfile() {
@@ -1286,16 +1328,24 @@ func (m *settingsModel) deleteProfile() {
 		text:  fmt.Sprintf("¿Estás seguro de que querés eliminar el perfil %q?", p.Name),
 		ok:    false,
 	}
-	m.confirmAction = func() {
-		m.cfg.Profiles = append(m.cfg.Profiles[:m.fieldIdx], m.cfg.Profiles[m.fieldIdx+1:]...)
-		if m.cfg.ActiveProfile == p.Name {
-			m.cfg.ActiveProfile = m.cfg.Profiles[0].Name
-		}
-		if m.fieldIdx >= len(m.cfg.Profiles) {
-			m.fieldIdx = len(m.cfg.Profiles) - 1
-		}
-		m.dirty = true
-		m.save()
+	m.confirmType = confirmDeleteProfile
+}
+
+func (m *settingsModel) executeDeleteProfile() {
+	if m.fieldIdx < 0 || m.fieldIdx >= len(m.cfg.Profiles) {
+		return
+	}
+	p := m.cfg.Profiles[m.fieldIdx]
+	m.cfg.Profiles = append(m.cfg.Profiles[:m.fieldIdx], m.cfg.Profiles[m.fieldIdx+1:]...)
+	if m.cfg.ActiveProfile == p.Name {
+		m.cfg.ActiveProfile = m.cfg.Profiles[0].Name
+	}
+	if m.fieldIdx >= len(m.cfg.Profiles) {
+		m.fieldIdx = len(m.cfg.Profiles) - 1
+	}
+	m.dirty = true
+	m.save()
+	if m.err == nil {
 		m.notice = fmt.Sprintf("Perfil %q eliminado correctamente.", p.Name)
 	}
 }
@@ -1329,36 +1379,38 @@ func (m *settingsModel) installWindowsTask() {
 		text:  fmt.Sprintf("¿Desea registrar la tarea %q en el Programador de Windows?", taskName),
 		ok:    true,
 	}
-	m.confirmAction = func() {
-		exePath, err := os.Executable()
-		if err != nil {
-			m.err = err
-			return
-		}
-		if !m.cfg.Schedule.Enabled {
-			m.cfg.Schedule.Enabled = true
-			m.dirty = true
-			if m.app != nil {
-				_ = m.app.SaveSettings(m.cfg)
-			}
-		}
-		spec, err := scheduler.SpecForProfile(m.cfg, m.cfg.ActiveProfile, exePath)
-		if err != nil {
-			m.err = err
-			return
-		}
-		err = scheduler.New().Install(context.Background(), spec)
-		if err != nil {
-			if pErr, ok := err.(*scheduler.PermissionError); ok {
-				m.err = fmt.Errorf("permiso de administrador requerido. Ejecutá en PowerShell elevado:\n%s", pErr.Command)
-			} else {
-				m.err = err
-			}
-			return
-		}
-		m.notice = fmt.Sprintf("Tarea %q instalada exitosamente.", spec.TaskName)
-		m.refreshWindowsTaskStatus()
+	m.confirmType = confirmInstallWindowsTask
+}
+
+func (m *settingsModel) executeInstallWindowsTask() {
+	exePath, err := os.Executable()
+	if err != nil {
+		m.err = err
+		return
 	}
+	if !m.cfg.Schedule.Enabled {
+		m.cfg.Schedule.Enabled = true
+		m.dirty = true
+		if m.app != nil {
+			_ = m.app.SaveSettings(m.cfg)
+		}
+	}
+	spec, err := scheduler.SpecForProfile(m.cfg, m.cfg.ActiveProfile, exePath)
+	if err != nil {
+		m.err = err
+		return
+	}
+	err = scheduler.New().Install(context.Background(), spec)
+	if err != nil {
+		if pErr, ok := err.(*scheduler.PermissionError); ok {
+			m.err = fmt.Errorf("permiso de administrador requerido. Ejecutá en PowerShell elevado:\n%s", pErr.Command)
+		} else {
+			m.err = err
+		}
+		return
+	}
+	m.notice = fmt.Sprintf("Tarea %q instalada exitosamente.", spec.TaskName)
+	m.refreshWindowsTaskStatus()
 }
 
 func (m *settingsModel) deleteWindowsTask() {
@@ -1368,19 +1420,38 @@ func (m *settingsModel) deleteWindowsTask() {
 		text:  fmt.Sprintf("¿Desea eliminar la tarea %q del Programador de Windows?", taskName),
 		ok:    false,
 	}
-	m.confirmAction = func() {
-		err := scheduler.New().Delete(context.Background(), taskName)
-		if err != nil {
-			if pErr, ok := err.(*scheduler.PermissionError); ok {
-				m.err = fmt.Errorf("permiso de administrador requerido:\n%s", pErr.Command)
-			} else {
-				m.err = err
-			}
-			return
+	m.confirmType = confirmDeleteWindowsTask
+}
+
+func (m *settingsModel) executeDeleteWindowsTask() {
+	taskName := m.cfg.TaskNameForProfile(m.cfg.ActiveProfile)
+	err := scheduler.New().Delete(context.Background(), taskName)
+	if err != nil {
+		if pErr, ok := err.(*scheduler.PermissionError); ok {
+			m.err = fmt.Errorf("permiso de administrador requerido:\n%s", pErr.Command)
+		} else {
+			m.err = err
 		}
-		m.notice = fmt.Sprintf("Tarea %q eliminada de Windows.", taskName)
-		m.refreshWindowsTaskStatus()
+		return
 	}
+	m.notice = fmt.Sprintf("Tarea %q eliminada de Windows.", taskName)
+	m.refreshWindowsTaskStatus()
+}
+
+func (m *settingsModel) finishConfirm() {
+	kind := m.confirmType
+	m.confirm = nil
+	m.confirmType = confirmNone
+
+	switch kind {
+	case confirmDeleteProfile:
+		m.executeDeleteProfile()
+	case confirmDeleteWindowsTask:
+		m.executeDeleteWindowsTask()
+	case confirmInstallWindowsTask:
+		m.executeInstallWindowsTask()
+	}
+	m.updateViewportContent()
 }
 
 func (m *settingsModel) runPlatformCheck(target string) {
