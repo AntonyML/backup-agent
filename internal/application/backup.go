@@ -391,6 +391,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 
 		isR2 := strings.EqualFold(b.Name(), "r2")
 		isServer := strings.EqualFold(b.Name(), "server")
+		isSupabase := strings.EqualFold(b.Name(), "supabase")
 
 		if uploadErr != nil {
 			var retryErr *storage.RetryableError
@@ -425,6 +426,20 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 						ErrorMessage: sanitizeError(uploadErr),
 						AgentVersion: version.Current,
 					})
+				} else if isSupabase {
+					errorStage = "supabase_sync"
+					pst.SetPending(config.PlatformSupabase, true)
+					a.recordEvent(ctx, events.Event{
+						EventID:      events.GenerateID(),
+						RunID:        runID,
+						Timestamp:    time.Now().UTC(),
+						EventType:    events.TypeSupabaseSyncFailed,
+						Status:       events.StatusFailed,
+						Backend:      "supabase",
+						FileName:     filepath.Base(finalPath),
+						ErrorMessage: sanitizeError(uploadErr),
+						AgentVersion: version.Current,
+					})
 				}
 				_ = state.Save(a.statePath, st)
 				hadPending = true
@@ -436,6 +451,9 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 				if isServer {
 					failType = events.TypeServerSyncFailed
 					errorStage = "server_sync"
+				} else if isSupabase {
+					failType = events.TypeSupabaseSyncFailed
+					errorStage = "supabase_sync"
 				}
 				a.recordEvent(ctx, events.Event{
 					EventID:      events.GenerateID(),
@@ -522,6 +540,56 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 						EventType:    events.TypeServerRotationCompleted,
 						Status:       events.StatusSuccess,
 						Backend:      "server",
+						AgentVersion: version.Current,
+					})
+				}
+			} else if isSupabase {
+				pst.MarkSynced(config.PlatformSupabase, filepath.Base(finalPath))
+				a.recordEvent(ctx, events.Event{
+					EventID:      events.GenerateID(),
+					RunID:        runID,
+					Timestamp:    time.Now().UTC(),
+					EventType:    events.TypeSupabaseSyncCompleted,
+					Status:       events.StatusSuccess,
+					Backend:      "supabase",
+					FileName:     filepath.Base(finalPath),
+					AgentVersion: version.Current,
+				})
+				bucketName := a.cfg.Supabase.Storage.Bucket
+				if bucketName == "" {
+					bucketName = "backups"
+				}
+				a.recordArtifact(ctx, events.ArtifactTelemetry{
+					ArtifactID:  events.GenerateArtifactID(),
+					RunID:       runID,
+					Backend:     "supabase_storage",
+					Filename:    filepath.Base(finalPath),
+					SizeBytes:   backupSize,
+					SHA256:      sum,
+					IsVerified:  true,
+					StoragePath: fmt.Sprintf("%s/%s/%s", bucketName, a.cfg.Database, filepath.Base(finalPath)),
+				})
+				if err := b.Rotate(ctx, a.supabaseStorageKeep()); err != nil {
+					a.logger.Warn("rotación en Supabase Storage con advertencia",
+						"backend", b.Name(), "error", err)
+					a.recordEvent(ctx, events.Event{
+						EventID:      events.GenerateID(),
+						RunID:        runID,
+						Timestamp:    time.Now().UTC(),
+						EventType:    events.TypeSupabaseRotationFailed,
+						Status:       events.StatusFailed,
+						Backend:      "supabase",
+						ErrorMessage: sanitizeError(err),
+						AgentVersion: version.Current,
+					})
+				} else {
+					a.recordEvent(ctx, events.Event{
+						EventID:      events.GenerateID(),
+						RunID:        runID,
+						Timestamp:    time.Now().UTC(),
+						EventType:    events.TypeSupabaseRotationCompleted,
+						Status:       events.StatusSuccess,
+						Backend:      "supabase",
 						AgentVersion: version.Current,
 					})
 				}

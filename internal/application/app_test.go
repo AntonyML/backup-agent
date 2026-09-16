@@ -408,17 +408,20 @@ func TestGetTUIStatus(t *testing.T) {
 	if bStatus.Result != "never_run" {
 		t.Errorf("esperaba never_run, dio: %s", bStatus.Result)
 	}
-	if len(backends) != 4 {
-		t.Fatalf("esperaba 4 backends (Local, R2, Server, Supabase), dio %d", len(backends))
+	if len(backends) != 5 {
+		t.Fatalf("esperaba 5 backends (Local, R2, Server, Supabase, Supabase Storage), dio %d", len(backends))
 	}
-	if backends[0].Name != "Local" || backends[1].Name != "R2" || backends[2].Name != "Server" || backends[3].Name != "Supabase" {
+	if backends[0].Name != "Local" || backends[1].Name != "R2" || backends[2].Name != "Server" || backends[3].Name != "Supabase" || backends[4].Name != "Supabase Storage" {
 		t.Errorf("nombres de backends inesperados: %+v", backends)
 	}
 	if backends[2].Configured {
-		t.Errorf("Server deberÃ­a figurar como no configurado")
+		t.Errorf("Server debería figurar como no configurado")
 	}
 	if backends[3].Configured {
-		t.Errorf("Supabase deberÃ­a figurar como no configurado")
+		t.Errorf("Supabase debería figurar como no configurado")
+	}
+	if backends[4].Configured {
+		t.Errorf("Supabase Storage debería figurar como no configurado")
 	}
 
 	// Caso 2: Con estado exitoso

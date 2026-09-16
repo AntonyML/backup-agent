@@ -11,6 +11,7 @@ import (
 const (
 	PlatformCloudflare = "cloudflare"
 	PlatformServer     = "remote_server"
+	PlatformSupabase   = "supabase"
 	PlatformLocal      = "local" // implícito: no se lista en perfiles
 	InitialProfileName = "full"
 	KindLocal          = "local"
@@ -24,7 +25,7 @@ var ValidKinds = []string{KindLocal, KindDev, KindHibrido, KindFull}
 
 // ValidPlatforms lista las plataformas que un perfil puede referenciar.
 // Diseñado para crecer con plataformas futuras (s3, azure) sin cambiar el esquema.
-var ValidPlatforms = []string{PlatformCloudflare, PlatformServer}
+var ValidPlatforms = []string{PlatformCloudflare, PlatformServer, PlatformSupabase}
 
 // PlatformCloudflareOverride agrupa los overrides de plataforma para Cloudflare R2.
 // Punteros: nil = heredar el valor global de plataforma sin override.
@@ -40,12 +41,19 @@ type PlatformServerOverride struct {
 	TimeoutSec *int `json:"timeout_sec,omitempty"`
 }
 
+// PlatformSupabaseOverride agrupa los overrides de plataforma para Supabase Storage.
+type PlatformSupabaseOverride struct {
+	Keep       *int `json:"keep,omitempty"`
+	TimeoutSec *int `json:"timeout_sec,omitempty"`
+}
+
 // ProfileOverrides contiene los overrides de retención/timeout/reintentos por
 // plataforma del perfil (D5: la retención por perfil se expresa como override
 // sobre los valores globales de la plataforma).
 type ProfileOverrides struct {
 	Cloudflare   *PlatformCloudflareOverride `json:"cloudflare,omitempty"`
 	RemoteServer *PlatformServerOverride     `json:"remote_server,omitempty"`
+	Supabase     *PlatformSupabaseOverride   `json:"supabase,omitempty"`
 }
 
 // Profile es un perfil de backup de primera clase (D10):
@@ -68,6 +76,9 @@ func (c Config) EnabledPlatforms() []string {
 	}
 	if c.RemoteServer.Enabled {
 		out = append(out, PlatformServer)
+	}
+	if c.Supabase.Storage.Enabled {
+		out = append(out, PlatformSupabase)
 	}
 	sort.Strings(out)
 	return out
@@ -271,6 +282,14 @@ func validateOverrides(o ProfileOverrides) error {
 		}
 		if o.RemoteServer.TimeoutSec != nil && *o.RemoteServer.TimeoutSec < 0 {
 			return fmt.Errorf("remote_server.timeout_sec no puede ser negativo")
+		}
+	}
+	if o.Supabase != nil {
+		if o.Supabase.Keep != nil && *o.Supabase.Keep < 1 {
+			return fmt.Errorf("supabase.keep debe ser >= 1, recibí %d", *o.Supabase.Keep)
+		}
+		if o.Supabase.TimeoutSec != nil && *o.Supabase.TimeoutSec < 0 {
+			return fmt.Errorf("supabase.timeout_sec no puede ser negativo")
 		}
 	}
 	return nil

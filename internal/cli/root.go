@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"femucaribe-backup-agent/internal/application"
 	"femucaribe-backup-agent/internal/config"
@@ -17,6 +18,7 @@ import (
 	"femucaribe-backup-agent/internal/storage/local"
 	"femucaribe-backup-agent/internal/storage/r2"
 	"femucaribe-backup-agent/internal/storage/server"
+	supabase_storage "femucaribe-backup-agent/internal/storage/supabase"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -192,6 +194,18 @@ func BuildDefaultApp(exeDir string, cfgPath string, profile string) (*applicatio
 			logger.Warn("supabase habilitado pero no se encontró API key en config.json ni en variables de entorno (SUPABASE_KEY / SUPABASE_API_KEY)")
 		} else {
 			eventRepo = events.NewSupabaseRepository(cfg.Supabase, apiKey, nil)
+			if cfg.Supabase.Storage.Enabled {
+				timeout := time.Duration(cfg.Supabase.Storage.TimeoutSec) * time.Second
+				if timeout <= 0 {
+					timeout = 600 * time.Second
+				}
+				bucket := cfg.Supabase.Storage.Bucket
+				if bucket == "" {
+					bucket = "backups"
+				}
+				spClient := supabase_storage.NewClient(cfg.Supabase.URL, apiKey, timeout, nil)
+				backends = append(backends, supabase_storage.NewBackend(spClient, bucket, cfg.Database))
+			}
 		}
 	}
 

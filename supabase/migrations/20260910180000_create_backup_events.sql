@@ -85,17 +85,28 @@ CREATE INDEX IF NOT EXISTS idx_backup_events_status ON public.backup_events (sta
 CREATE TABLE IF NOT EXISTS public.backup_artifacts (
     artifact_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES public.backup_runs(run_id) ON DELETE CASCADE,
-    backend TEXT NOT NULL,
+    backend TEXT NOT NULL CHECK (backend IN ('local', 'cloudflare_r2', 'remote_unc', 'supabase_storage')),
     filename TEXT NOT NULL,
     size_bytes BIGINT NOT NULL,
-    sha256 TEXT,
-    is_verified BOOLEAN,
-    storage_path TEXT,
+    sha256 TEXT NOT NULL,
+    is_verified BOOLEAN DEFAULT true,
+    storage_path TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_backup_artifacts_run_id ON public.backup_artifacts (run_id);
 CREATE INDEX IF NOT EXISTS idx_backup_artifacts_backend ON public.backup_artifacts (backend);
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'backup_artifacts_backend_check'
+    ) THEN
+        ALTER TABLE public.backup_artifacts DROP CONSTRAINT backup_artifacts_backend_check;
+        ALTER TABLE public.backup_artifacts ADD CONSTRAINT backup_artifacts_backend_check 
+            CHECK (backend IN ('local', 'cloudflare_r2', 'remote_unc', 'supabase_storage'));
+    END IF;
+END $$;
 
 -- 5. Vista de Consultas Rápidas (Unificada)
 CREATE OR REPLACE VIEW public.v_backup_runs_full AS

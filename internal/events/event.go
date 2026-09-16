@@ -35,9 +35,13 @@ const (
 	TypeR2SyncFailed            = "r2_sync_failed"
 	TypeServerSyncCompleted     = "server_sync_completed"
 	TypeServerSyncFailed        = "server_sync_failed"
-	TypeServerRotationCompleted = "server_rotation_completed"
-	TypeServerRotationFailed    = "server_rotation_failed"
-	TypePendingSync             = "pending_sync"
+	TypeServerRotationCompleted   = "server_rotation_completed"
+	TypeServerRotationFailed      = "server_rotation_failed"
+	TypeSupabaseSyncCompleted     = "supabase_sync_completed"
+	TypeSupabaseSyncFailed        = "supabase_sync_failed"
+	TypeSupabaseRotationCompleted = "supabase_rotation_completed"
+	TypeSupabaseRotationFailed    = "supabase_rotation_failed"
+	TypePendingSync               = "pending_sync"
 )
 
 // Estados de evento operativo.

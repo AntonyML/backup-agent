@@ -155,6 +155,31 @@ func (a *App) GetTUIStatus(ctx context.Context) (BackupStatus, []BackendStatus, 
 		StatusText:  supabaseStatusText,
 	})
 
+	// 5. Supabase Storage
+	supabaseStorageConfigured := false
+	for _, b := range a.backends {
+		if strings.EqualFold(b.Name(), "supabase") {
+			supabaseStorageConfigured = true
+			break
+		}
+	}
+	spLastSynced := pst.LastSyncedFiles[config.PlatformSupabase]
+	spStatusText := "Not configured"
+	if supabaseStorageConfigured {
+		if pst.IsPending(config.PlatformSupabase) {
+			spStatusText = "PENDING"
+		} else {
+			spStatusText = "OK"
+		}
+	}
+	backendStatuses = append(backendStatuses, BackendStatus{
+		Name:        "Supabase Storage",
+		Configured:  supabaseStorageConfigured,
+		LastSyncOK:  supabaseStorageConfigured && !pst.IsPending(config.PlatformSupabase) && spLastSynced != "",
+		PendingSync: pst.IsPending(config.PlatformSupabase),
+		StatusText:  spStatusText,
+	})
+
 	return backupStatus, backendStatuses, nil
 }
 

@@ -328,7 +328,11 @@ func (m *settingsModel) groupSummary(idx int) string {
 		if m.cfg.RemoteServer.Enabled {
 			unc = fmt.Sprintf("activo (%d copias)", m.cfg.RemoteServer.Keep)
 		}
-		return fmt.Sprintf("Local · R2: %s · UNC: %s", r2, unc)
+		sp := "desactivado"
+		if m.cfg.Supabase.Storage.Enabled {
+			sp = fmt.Sprintf("activo (%d copias)", m.cfg.Supabase.Storage.Keep)
+		}
+		return fmt.Sprintf("Local · R2: %s · UNC: %s · Supabase: %s", r2, unc, sp)
 	case groupSchedule:
 		return fmt.Sprintf("modo: %s a las %s · sync post-backup: %v", m.cfg.Schedule.Mode, m.cfg.Schedule.TimeOfDay, m.cfg.Schedule.SyncAfterBackup)
 	case groupDatabase:
@@ -362,7 +366,7 @@ func (m *settingsModel) groupHelp(idx int) string {
 	case groupProfiles:
 		return "Crear, duplicar, renombrar, cambiar tipo o plataformas de cada perfil."
 	case groupPlatforms:
-		return "Configuración y diagnóstico de destinos: Local, Cloudflare R2 y Servidor UNC."
+		return "Configuración y diagnóstico de destinos: Local, Cloudflare R2, Servidor UNC y Supabase Storage."
 	case groupSchedule:
 		return "Horarios, frecuencia, días de corrida y sincronización con el Programador de Windows."
 	case groupDatabase:
@@ -392,6 +396,8 @@ func (m *settingsModel) subTitle() string {
 			return "Cloudflare R2"
 		case 2:
 			return "Servidor UNC"
+		case 3:
+			return "Supabase Storage"
 		}
 	case groupSchedule:
 		return "Tarea de Windows"
@@ -778,6 +784,64 @@ func (m *settingsModel) platformUNCFields() []settingsField {
 	}
 }
 
+func (m *settingsModel) platformSupabaseFields() []settingsField {
+	return []settingsField{
+		{
+			Label: "Subida a Supabase Storage", Kind: kindBool, Options: boolOptions(),
+			Help: "Activa o desactiva la copia en el bucket de Supabase Storage.",
+			Get:  func(s application.Settings) string { return strconv.FormatBool(s.Supabase.Storage.Enabled) },
+			Set: func(s *application.Settings, v string) error {
+				b, err := parseBool(v)
+				if err != nil {
+					return err
+				}
+				s.Supabase.Storage.Enabled = b
+				return nil
+			},
+		},
+		{
+			Label: "Nombre del Bucket", Kind: kindText,
+			Help: "Nombre del bucket en Supabase Storage donde se guardan los backups (default: backups).",
+			Get: func(s application.Settings) string {
+				if s.Supabase.Storage.Bucket == "" {
+					return "backups"
+				}
+				return s.Supabase.Storage.Bucket
+			},
+			Set: func(s *application.Settings, v string) error {
+				s.Supabase.Storage.Bucket = strings.TrimSpace(v)
+				return nil
+			},
+		},
+		{
+			Label: "Copias en bucket (keep)", Kind: kindInt,
+			Help: "Cantidad de copias retenidas en el bucket de Supabase.",
+			Get:  func(s application.Settings) string { return strconv.Itoa(s.Supabase.Storage.Keep) },
+			Set: func(s *application.Settings, v string) error {
+				n, err := parseInt(v)
+				if err != nil {
+					return err
+				}
+				s.Supabase.Storage.Keep = n
+				return nil
+			},
+		},
+		{
+			Label: "Timeout de subida (s)", Kind: kindInt,
+			Help: "Tiempo límite en segundos para subir al bucket de Supabase.",
+			Get:  func(s application.Settings) string { return strconv.Itoa(s.Supabase.Storage.TimeoutSec) },
+			Set: func(s *application.Settings, v string) error {
+				n, err := parseInt(v)
+				if err != nil {
+					return err
+				}
+				s.Supabase.Storage.TimeoutSec = n
+				return nil
+			},
+		},
+	}
+}
+
 func (m *settingsModel) profileOverrideFields() []settingsField {
 	if m.fieldIdx < 0 || m.fieldIdx >= len(m.cfg.Profiles) {
 		return nil
@@ -990,6 +1054,88 @@ func (m *settingsModel) profileOverrideFields() []settingsField {
 				return nil
 			},
 		},
+		{
+			Label: "Supabase: Copias retenidas (keep)", Kind: kindInt,
+			Help:  fmt.Sprintf("Copias a retener en Supabase Storage para este perfil (vacío o 0 = hereda global: %d).", m.cfg.Supabase.Storage.Keep),
+			Get: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.Supabase != nil && s.Profiles[profileIdx].Overrides.Supabase.Keep != nil {
+					return strconv.Itoa(*s.Profiles[profileIdx].Overrides.Supabase.Keep)
+				}
+				return ""
+			},
+			Display: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.Supabase != nil && s.Profiles[profileIdx].Overrides.Supabase.Keep != nil {
+					return fmt.Sprintf("%d (override)", *s.Profiles[profileIdx].Overrides.Supabase.Keep)
+				}
+				return fmt.Sprintf("Heredado (%d)", s.Supabase.Storage.Keep)
+			},
+			Set: func(s *application.Settings, v string) error {
+				if profileIdx >= len(s.Profiles) {
+					return fmt.Errorf("perfil no encontrado")
+				}
+				v = strings.TrimSpace(v)
+				if v == "" || v == "0" || strings.EqualFold(v, "heredar") {
+					if s.Profiles[profileIdx].Overrides.Supabase != nil {
+						s.Profiles[profileIdx].Overrides.Supabase.Keep = nil
+					}
+					m.cleanupOverrides(&s.Profiles[profileIdx])
+					return nil
+				}
+				n, err := parseInt(v)
+				if err != nil {
+					return err
+				}
+				if n < 1 {
+					return fmt.Errorf("la cantidad de copias debe ser >= 1 (o vacío para heredar)")
+				}
+				if s.Profiles[profileIdx].Overrides.Supabase == nil {
+					s.Profiles[profileIdx].Overrides.Supabase = &application.PlatformSupabaseOverride{}
+				}
+				s.Profiles[profileIdx].Overrides.Supabase.Keep = &n
+				return nil
+			},
+		},
+		{
+			Label: "Supabase: Timeout de subida (s)", Kind: kindInt,
+			Help:  fmt.Sprintf("Tiempo límite en segundos para subir a Supabase Storage (vacío = hereda global: %d s).", m.cfg.Supabase.Storage.TimeoutSec),
+			Get: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.Supabase != nil && s.Profiles[profileIdx].Overrides.Supabase.TimeoutSec != nil {
+					return strconv.Itoa(*s.Profiles[profileIdx].Overrides.Supabase.TimeoutSec)
+				}
+				return ""
+			},
+			Display: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.Supabase != nil && s.Profiles[profileIdx].Overrides.Supabase.TimeoutSec != nil {
+					return fmt.Sprintf("%d s (override)", *s.Profiles[profileIdx].Overrides.Supabase.TimeoutSec)
+				}
+				return fmt.Sprintf("Heredado (%d s)", s.Supabase.Storage.TimeoutSec)
+			},
+			Set: func(s *application.Settings, v string) error {
+				if profileIdx >= len(s.Profiles) {
+					return fmt.Errorf("perfil no encontrado")
+				}
+				v = strings.TrimSpace(v)
+				if v == "" || strings.EqualFold(v, "heredar") {
+					if s.Profiles[profileIdx].Overrides.Supabase != nil {
+						s.Profiles[profileIdx].Overrides.Supabase.TimeoutSec = nil
+					}
+					m.cleanupOverrides(&s.Profiles[profileIdx])
+					return nil
+				}
+				n, err := parseInt(v)
+				if err != nil {
+					return err
+				}
+				if n < 0 {
+					return fmt.Errorf("el timeout no puede ser negativo")
+				}
+				if s.Profiles[profileIdx].Overrides.Supabase == nil {
+					s.Profiles[profileIdx].Overrides.Supabase = &application.PlatformSupabaseOverride{}
+				}
+				s.Profiles[profileIdx].Overrides.Supabase.TimeoutSec = &n
+				return nil
+			},
+		},
 	}
 }
 
@@ -1002,6 +1148,11 @@ func (m *settingsModel) cleanupOverrides(p *application.Profile) {
 	if p.Overrides.RemoteServer != nil {
 		if p.Overrides.RemoteServer.Keep == nil && p.Overrides.RemoteServer.TimeoutSec == nil {
 			p.Overrides.RemoteServer = nil
+		}
+	}
+	if p.Overrides.Supabase != nil {
+		if p.Overrides.Supabase.Keep == nil && p.Overrides.Supabase.TimeoutSec == nil {
+			p.Overrides.Supabase = nil
 		}
 	}
 }
@@ -1029,6 +1180,8 @@ func (m *settingsModel) currentFields() []settingsField {
 				return m.platformR2Fields()
 			case 2:
 				return m.platformUNCFields()
+			case 3:
+				return m.platformSupabaseFields()
 			}
 		case groupProfiles:
 			return m.profileOverrideFields()
@@ -1294,7 +1447,7 @@ func (m *settingsModel) move(delta int) {
 				m.fieldIdx = (m.fieldIdx + delta + n) % n
 			}
 		case groupPlatforms:
-			m.fieldIdx = (m.fieldIdx + delta + 3) % 3
+			m.fieldIdx = (m.fieldIdx + delta + 4) % 4
 		default:
 			fields := m.currentFields()
 			if len(fields) > 0 {
@@ -1879,6 +2032,7 @@ func (m settingsModel) viewPlatformsMenu(b *strings.Builder) {
 		{"Destino Local", "Carpeta en el servidor SQL donde se generan los archivos .bak."},
 		{"Cloudflare R2 (nube)", "Almacenamiento remoto de objetos compatible con S3."},
 		{"Servidor externo (UNC)", "Copia secundaria a carpeta compartida de red \\\\servidor\\recurso."},
+		{"Supabase Storage", "Almacenamiento remoto de backups en bucket de Supabase."},
 	}
 
 	for i, it := range items {

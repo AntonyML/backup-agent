@@ -16,8 +16,10 @@ type Profile = config.Profile
 type ProfileOverrides = config.ProfileOverrides
 type PlatformCloudflareOverride = config.PlatformCloudflareOverride
 type PlatformServerOverride = config.PlatformServerOverride
+type PlatformSupabaseOverride = config.PlatformSupabaseOverride
 type CloudflareConfig = config.CloudflareConfig
 type ServerStorageConfig = config.ServerStorageConfig
+type SupabaseStorageConfig = config.SupabaseStorageConfig
 type ScheduleConfig = config.ScheduleConfig
 type SupabaseConfig = config.SupabaseConfig
 
@@ -28,6 +30,7 @@ const (
 	KindFull           = config.KindFull
 	PlatformCloudflare = config.PlatformCloudflare
 	PlatformServer     = config.PlatformServer
+	PlatformSupabase   = config.PlatformSupabase
 	PlatformLocal      = config.PlatformLocal
 )
 

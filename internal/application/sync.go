@@ -57,6 +57,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 		a.logger.Warn("el archivo pendiente no existe en disco, descartando pendientes", "archivo", pst.LastBackupFile)
 		pst.SetPending(config.PlatformCloudflare, false)
 		pst.SetPending(config.PlatformServer, false)
+		pst.SetPending(config.PlatformSupabase, false)
 		_ = state.Save(a.statePath, st)
 		return fmt.Errorf("archivo pendiente no encontrado en disco: %s", pst.LastBackupFile)
 	}
@@ -66,9 +67,12 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 	for _, b := range a.backends {
 		isR2 := strings.EqualFold(b.Name(), "r2")
 		isServer := strings.EqualFold(b.Name(), "server")
+		isSupabase := strings.EqualFold(b.Name(), "supabase")
 
 		if !opts.Force {
-			if (isR2 && !pst.IsPending(config.PlatformCloudflare)) || (isServer && !pst.IsPending(config.PlatformServer)) {
+			if (isR2 && !pst.IsPending(config.PlatformCloudflare)) ||
+				(isServer && !pst.IsPending(config.PlatformServer)) ||
+				(isSupabase && !pst.IsPending(config.PlatformSupabase)) {
 				continue
 			}
 		}
@@ -85,6 +89,9 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 				pst.SetPending(config.PlatformServer, true)
 			} else if isR2 {
 				pst.SetPending(config.PlatformCloudflare, true)
+			} else if isSupabase {
+				failType = events.TypeSupabaseSyncFailed
+				pst.SetPending(config.PlatformSupabase, true)
 			}
 			a.recordEvent(ctx, events.Event{
 				EventID:      events.GenerateID(),
@@ -106,6 +113,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) error {
 			} else if isR2 {
 				pst.MarkSynced(config.PlatformCloudflare, filepath.Base(pst.LastBackupFile))
 				_ = b.Rotate(ctx, a.cloudflareKeep())
+			} else if isSupabase {
+				completedType = events.TypeSupabaseSyncCompleted
+				pst.MarkSynced(config.PlatformSupabase, filepath.Base(pst.LastBackupFile))
+				_ = b.Rotate(ctx, a.supabaseStorageKeep())
 			} else {
 				_ = b.Rotate(ctx, 0)
 			}

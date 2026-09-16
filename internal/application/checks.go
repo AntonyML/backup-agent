@@ -98,6 +98,29 @@ func (a *App) checkRemotePlatforms(ctx context.Context) []PlatformCheck {
 		checks = append(checks, PlatformCheck{Name: "Servidor UNC", OK: false, Detail: "no habilitada"})
 	}
 
+	hasSupabaseStorage := false
+	for _, b := range a.backends {
+		if !strings.EqualFold(b.Name(), "supabase") {
+			continue
+		}
+		hasSupabaseStorage = true
+		cctx, cancel := context.WithTimeout(ctx, time.Duration(a.supabaseStorageTimeoutSec())*time.Second)
+		_, err := b.LatestRemote(cctx)
+		cancel()
+		if err != nil {
+			checks = append(checks, PlatformCheck{Name: "Supabase Storage", OK: false, Detail: err.Error()})
+		} else {
+			checks = append(checks, PlatformCheck{Name: "Supabase Storage", OK: true, Detail: "bucket accesible"})
+		}
+	}
+	if !hasSupabaseStorage {
+		detail := "no habilitada"
+		if a.cfg.Supabase.Storage.Enabled {
+			detail = "habilitada pero cliente no inicializado (verificar supabase.enabled y api_key)"
+		}
+		checks = append(checks, PlatformCheck{Name: "Supabase Storage", OK: false, Detail: detail})
+	}
+
 	return checks
 }
 

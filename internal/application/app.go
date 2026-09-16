@@ -200,6 +200,10 @@ func filterBackendsForProfile(cfg config.Config, profile string, backends []stor
 			if wanted[config.PlatformServer] {
 				out = append(out, b)
 			}
+		case strings.EqualFold(b.Name(), "supabase"):
+			if wanted[config.PlatformSupabase] {
+				out = append(out, b)
+			}
 		default:
 			// Backend futuro/desconocido: se conserva por compatibilidad.
 			out = append(out, b)
@@ -313,10 +317,40 @@ func (a *App) serverTimeoutSec() int {
 	return 300
 }
 
+// profileSupabaseOverride devuelve el override de Supabase Storage del perfil activo, si lo hay.
+func (a *App) profileSupabaseOverride() *config.PlatformSupabaseOverride {
+	return a.activeProfile().Overrides.Supabase
+}
+
+// supabaseStorageKeep resuelve el keep de Supabase Storage: override del perfil, si no el global.
+func (a *App) supabaseStorageKeep() int {
+	if o := a.profileSupabaseOverride(); o != nil {
+		return orInt(o.Keep, a.cfg.Supabase.Storage.Keep)
+	}
+	if a.cfg.Supabase.Storage.Keep > 0 {
+		return a.cfg.Supabase.Storage.Keep
+	}
+	return 3
+}
+
+// supabaseStorageTimeoutSec devuelve el timeout configurado para subidas a Supabase Storage.
+func (a *App) supabaseStorageTimeoutSec() int {
+	if o := a.profileSupabaseOverride(); o != nil {
+		return orInt(o.TimeoutSec, a.cfg.Supabase.Storage.TimeoutSec)
+	}
+	if a.cfg.Supabase.Storage.TimeoutSec > 0 {
+		return a.cfg.Supabase.Storage.TimeoutSec
+	}
+	return 600
+}
+
 // backendTimeout devuelve el timeout de subida para un backend según plataforma.
 func (a *App) backendTimeout(b storage.Backend) time.Duration {
 	if strings.EqualFold(b.Name(), "server") {
 		return time.Duration(a.serverTimeoutSec()) * time.Second
+	}
+	if strings.EqualFold(b.Name(), "supabase") {
+		return time.Duration(a.supabaseStorageTimeoutSec()) * time.Second
 	}
 	return time.Duration(a.cloudflareTimeoutSec()) * time.Second
 }

@@ -53,12 +53,21 @@ type ServerStorageConfig struct {
 	TimeoutSec int    `json:"timeout_sec"`
 }
 
-// SupabaseConfig define la configuración para el registro centralizado de eventos en Supabase (Fase 4).
-type SupabaseConfig struct {
+// SupabaseStorageConfig define el destino Supabase Storage (bucket de backups).
+type SupabaseStorageConfig struct {
 	Enabled    bool   `json:"enabled"`
-	URL        string `json:"url"`
-	APIKey     string `json:"api_key,omitempty"`
+	Bucket     string `json:"bucket"`
+	Keep       int    `json:"keep"`
 	TimeoutSec int    `json:"timeout_sec"`
+}
+
+// SupabaseConfig define la configuración para el registro centralizado de eventos y storage en Supabase (Fase 4).
+type SupabaseConfig struct {
+	Enabled    bool                  `json:"enabled"`
+	URL        string                `json:"url"`
+	APIKey     string                `json:"api_key,omitempty"`
+	TimeoutSec int                   `json:"timeout_sec"`
+	Storage    SupabaseStorageConfig `json:"storage"`
 }
 
 // Config es toda la configuración de Fase 1 y backends desacoplados.
@@ -122,6 +131,12 @@ func Default() Config {
 			Enabled:    false,
 			URL:        "",
 			TimeoutSec: 10,
+			Storage: SupabaseStorageConfig{
+				Enabled:    false,
+				Bucket:     "backups",
+				Keep:       3,
+				TimeoutSec: 600,
+			},
 		},
 		Cloudflare: CloudflareConfig{
 			Enabled:       false,
@@ -242,6 +257,19 @@ func (c Config) Validate() error {
 		if c.Supabase.TimeoutSec < 0 {
 			return fmt.Errorf("config: supabase.timeout_sec no puede ser negativo")
 		}
+		if c.Supabase.Storage.Enabled {
+			if strings.TrimSpace(c.Supabase.Storage.Bucket) == "" {
+				return fmt.Errorf("config: supabase.storage.bucket no puede estar vacío")
+			}
+			if c.Supabase.Storage.Keep < 1 {
+				return fmt.Errorf("config: supabase.storage.keep debe ser >= 1, recibí %d", c.Supabase.Storage.Keep)
+			}
+			if c.Supabase.Storage.TimeoutSec < 0 {
+				return fmt.Errorf("config: supabase.storage.timeout_sec no puede ser negativo")
+			}
+		}
+	} else if c.Supabase.Storage.Enabled {
+		return fmt.Errorf("config: supabase.storage requiere que supabase.enabled sea true")
 	}
 	if c.Cloudflare.Enabled {
 		if c.Cloudflare.Keep < 1 {

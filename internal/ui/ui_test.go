@@ -394,8 +394,8 @@ func TestSettings_ProfileOverridesFlow(t *testing.T) {
 	}
 
 	fields := appModel.settings.currentFields()
-	if len(fields) != 5 {
-		t.Fatalf("expected 5 override fields, got %d", len(fields))
+	if len(fields) != 7 {
+		t.Fatalf("expected 7 override fields, got %d", len(fields))
 	}
 
 	// Field 0: R2 keep (currently inherited: 1)
