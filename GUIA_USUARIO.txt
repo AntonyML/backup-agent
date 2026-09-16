@@ -174,10 +174,17 @@ GRUPO OBSERVABILIDAD (SUPABASE):
 Permite enviar automáticamente telemetría y eventos de cada corrida (inicio,
 progreso, éxito o error) a un proyecto Supabase en la nube:
   - Enviar eventos a Supabase: Activar / desactivar con [Enter].
-  - URL del proyecto Supabase: URL HTTPS (ej. https://xxxx.supabase.co).
-  - Clave API de Supabase: Token anon o service_role. Se oculta por seguridad (••••••••).
-    Si se deja vacía, hereda automáticamente la variable de entorno SUPABASE_KEY.
-  - Timeout HTTP Supabase (s): Tiempo de espera en peticiones (por defecto: 10s).
+  - URL del proyecto Supabase: URL HTTPS de su proyecto (ej. https://oxpxyiucnzpedawwkosy.supabase.co).
+  - Clave API de Supabase: Token de autenticación de Supabase.
+    ¿Dónde se obtiene en la web de Supabase?
+      1. Vaya a Project Settings (icono de engranaje abajo a la izquierda) › API Keys.
+      2. En la sección "Secret keys", copie la clave "default" que empieza por sb_secret_...
+         (haga clic en el botón de copiar o mostrar para verla completa).
+         * Nota: NO necesita crear una nueva clave ("New secret key"); use la que ya viene por defecto.
+         * También son válidas las claves anteriores ("Legacy anon, service_role API keys").
+    El campo en la TUI se oculta como contraseña (••••••••) por privacidad.
+    Si se deja vacío, el agente hereda automáticamente la variable de entorno SUPABASE_KEY.
+  - Timeout HTTP Supabase (s): Tiempo máximo de espera en peticiones (por defecto: 10s).
 
 CÓMO MODIFICAR CUALQUIER CAMPO DE CONFIGURACIÓN:
 1. Posiciónese sobre el campo con las flechas [↑/↓].
@@ -323,6 +330,18 @@ R: El agente trabaja con un archivo temporal terminado en ".bak.tmp".
    Si el proceso se interrumpe abruptamente, el archivo no se renombra a ".bak".
    En el próximo arranque, el agente detecta los temporales huérfanos y los
    limpia automáticamente antes de iniciar la nueva corrida, evitando basura en disco.
+
+P: ¿Qué clave API de Supabase debo copiar y dónde está en su panel web?
+R: En el panel de Supabase:
+   1. Ingrese a Project Settings (icono de engranaje abajo a la izquierda) › API Keys.
+   2. Verá dos tipos de claves: "Publishable key" y "Secret keys".
+   3. Para el agente de backup (que corre como servicio en su servidor), copie la clave
+      de la sección "Secret keys" (la que comienza con sb_secret_...).
+   4. NO necesita presionar "New secret key": use la fila llamada "default".
+      Haga clic en el botón de copiar o mostrar para obtener el texto completo.
+   5. Luego péguela en la TUI en Ajustes › Observabilidad › Clave API de Supabase.
+   (Nota: Si su proyecto utiliza las claves clásicas JWT, las encontrará en el enlace
+   "Legacy anon, service_role API keys" y ambas también son 100% compatibles).
 
 P: ¿Cómo se restaura una copia de seguridad generada por el agente?
 R: Dado que el agente genera copias estándar de SQL Server (.bak) verificadas
