@@ -12,6 +12,7 @@ import (
 	"femucaribe-backup-agent/internal/config"
 	"femucaribe-backup-agent/internal/events"
 	"femucaribe-backup-agent/internal/hasher"
+	"femucaribe-backup-agent/internal/hostinfo"
 	"femucaribe-backup-agent/internal/lock"
 	"femucaribe-backup-agent/internal/retry"
 	"femucaribe-backup-agent/internal/state"
@@ -37,7 +38,53 @@ func sanitizeError(err error) string {
 // Backup orquesta el ciclo de vida completo de un backup según las reglas de negocio.
 func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) {
 	startTime := time.Now()
-	a.recordEvent(ctx, events.NewEvent(events.TypeAgentStarted, events.StatusRunning))
+	runID := events.GenerateRunID()
+	var errorStage string
+
+	// 1. Recolectar telemetría completa de Host y registrar en backup_hosts
+	hostSpecs := hostinfo.CollectHostSpecs()
+	a.recordHost(ctx, hostSpecs)
+
+	// 2. Snapshot de red, recursos y proceso e iniciar corrida en backup_runs
+	snapshot := hostinfo.CollectRuntimeSnapshot(a.cfg.BackupDir)
+	triggerMode := "manual_tui"
+	if opts.Force {
+		triggerMode = "manual_cli"
+	}
+
+	authMode := a.cfg.AuthMode
+	if authMode == "" {
+		authMode = "windows"
+	}
+
+	runInfo := events.RunTelemetry{
+		RunID:                runID,
+		HostID:               hostSpecs.HostID,
+		StartedAt:            startTime.UTC(),
+		Status:               events.StatusRunning,
+		TriggerMode:          triggerMode,
+		ProfileName:          a.profileName,
+		DatabaseName:         a.cfg.Database,
+		SQLServerInstance:    a.cfg.Server,
+		SQLAuthMode:          authMode,
+		PrimaryIP:            snapshot.PrimaryIP,
+		LocalIPs:             snapshot.LocalIPs,
+		Username:             snapshot.Username,
+		UserDomain:           snapshot.UserDomain,
+		IsElevatedAdmin:      snapshot.IsElevatedAdmin,
+		ProcessID:            snapshot.ProcessID,
+		ProcessPath:          snapshot.ProcessPath,
+		AgentVersion:         snapshot.AgentVersion,
+		GoVersion:            snapshot.GoVersion,
+		FreeRAMBytes:         snapshot.FreeRAMBytes,
+		BackupDiskDrive:      snapshot.BackupDiskDrive,
+		BackupDiskFreeBytes:  snapshot.BackupDiskFreeBytes,
+		BackupDiskTotalBytes: snapshot.BackupDiskTotalBytes,
+		SystemUptimeSeconds:  snapshot.SystemUptimeSeconds,
+		Timezone:             snapshot.Timezone,
+	}
+	a.recordStartRun(ctx, runInfo)
+
 	defer func() {
 		status := events.StatusSuccess
 		errMsg := ""
@@ -45,16 +92,43 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 			status = events.StatusFailed
 			errMsg = sanitizeError(returnErr)
 		}
+		finishedAt := time.Now().UTC()
+		durationMs := time.Since(startTime).Milliseconds()
+
+		// Actualizar corrida en backup_runs
+		runInfo.Status = status
+		runInfo.FinishedAt = &finishedAt
+		runInfo.DurationMs = durationMs
+		runInfo.ErrorMessage = errMsg
+		if status == events.StatusSuccess {
+			runInfo.ErrorStage = ""
+		} else {
+			runInfo.ErrorStage = errorStage
+		}
+		a.recordFinishRun(context.Background(), runInfo)
+
+		// Evento de fin en backup_events
 		a.recordEvent(context.Background(), events.Event{
 			EventID:      events.GenerateID(),
-			Timestamp:    time.Now().UTC(),
+			RunID:        runID,
+			Timestamp:    finishedAt,
 			EventType:    events.TypeAgentFinished,
 			Status:       status,
-			DurationMs:   time.Since(startTime).Milliseconds(),
+			DurationMs:   durationMs,
 			ErrorMessage: errMsg,
 			AgentVersion: version.Current,
 		})
 	}()
+
+	a.recordEvent(ctx, events.Event{
+		EventID:      events.GenerateID(),
+		RunID:        runID,
+		Timestamp:    startTime.UTC(),
+		EventType:    events.TypeAgentStarted,
+		Status:       events.StatusRunning,
+		Hostname:     hostSpecs.Hostname,
+		AgentVersion: version.Current,
+	})
 
 	if err := a.cfg.Validate(); err != nil {
 		a.logger.Error("configuración inválida", "error", err)
@@ -123,6 +197,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	}
 
 	// Conexión y espacio libre
+	errorStage = "sql_connect"
 	db, err := a.sqlEngine.Open(a.sqlConnectOptions())
 	if err != nil {
 		a.logger.Error("conexión SQL falló", "error", err)
@@ -130,6 +205,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	}
 	defer db.Close()
 
+	errorStage = "db_size_estimate"
 	sizeCtx, sizeCancel := context.WithTimeout(ctx, 60*time.Second)
 	needed, err := a.sqlEngine.DatabaseSizeBytes(sizeCtx, db, a.cfg.Database)
 	sizeCancel()
@@ -139,6 +215,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	}
 	a.logger.Info("tamaño estimado de BD", "db", a.cfg.Database, "bytes", needed)
 
+	errorStage = "disk_space_check"
 	if err := a.sqlEngine.EnsureFreeSpace(a.cfg.BackupDir, needed); err != nil {
 		a.logger.Error("espacio insuficiente en disco", "error", err)
 		return fmt.Errorf("espacio en disco: %w", err)
@@ -153,9 +230,11 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	}
 	defer bakCancel()
 
+	errorStage = "sql_backup"
 	a.logger.Info("ejecutando BACKUP DATABASE", "db", a.cfg.Database, "destino_host", tmpPath, "destino_sql", sqlDestPath)
 	a.recordEvent(ctx, events.Event{
 		EventID:      events.GenerateID(),
+		RunID:        runID,
 		Timestamp:    time.Now().UTC(),
 		EventType:    events.TypeBackupStarted,
 		Status:       events.StatusRunning,
@@ -167,6 +246,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		_ = os.Remove(tmpPath)
 		a.recordEvent(ctx, events.Event{
 			EventID:      events.GenerateID(),
+			RunID:        runID,
 			Timestamp:    time.Now().UTC(),
 			EventType:    events.TypeBackupFailed,
 			Status:       events.StatusFailed,
@@ -184,11 +264,13 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		}
 	}
 
+	errorStage = "restore_verify"
 	a.logger.Info("ejecutando RESTORE VERIFYONLY", "archivo_sql", sqlDestPath)
 	if err := a.sqlEngine.VerifyBackup(bakCtx, db, sqlDestPath); err != nil {
 		_ = os.Remove(tmpPath)
 		a.recordEvent(ctx, events.Event{
 			EventID:      events.GenerateID(),
+			RunID:        runID,
 			Timestamp:    time.Now().UTC(),
 			EventType:    events.TypeBackupFailed,
 			Status:       events.StatusFailed,
@@ -237,8 +319,10 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		backupSize = fi.Size()
 	}
 
+	errorStage = "local_finalize"
 	a.recordEvent(ctx, events.Event{
 		EventID:      events.GenerateID(),
+		RunID:        runID,
 		Timestamp:    time.Now().UTC(),
 		EventType:    events.TypeLocalBackupCompleted,
 		Status:       events.StatusSuccess,
@@ -250,12 +334,26 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		AgentVersion: version.Current,
 	})
 
+	// Registrar artefacto local producido
+	a.recordArtifact(ctx, events.ArtifactTelemetry{
+		ArtifactID:  events.GenerateArtifactID(),
+		RunID:       runID,
+		Backend:     "local",
+		Filename:    filepath.Base(finalPath),
+		SizeBytes:   backupSize,
+		SHA256:      sum,
+		IsVerified:  true,
+		StoragePath: finalPath,
+	})
+
 	// Rotación local
+	errorStage = "local_rotation"
 	if a.localBackend != nil {
 		if err := a.localBackend.Rotate(ctx, a.cfg.Retain); err != nil {
 			a.logger.Warn("rotación local con error", "error", err)
 			a.recordEvent(ctx, events.Event{
 				EventID:      events.GenerateID(),
+				RunID:        runID,
 				Timestamp:    time.Now().UTC(),
 				EventType:    events.TypeLocalRotationFailed,
 				Status:       events.StatusFailed,
@@ -266,6 +364,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 		} else {
 			a.recordEvent(ctx, events.Event{
 				EventID:      events.GenerateID(),
+				RunID:        runID,
 				Timestamp:    time.Now().UTC(),
 				EventType:    events.TypeLocalRotationCompleted,
 				Status:       events.StatusSuccess,
@@ -299,9 +398,11 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 				a.logger.Warn("falla transitoria en backend remoto; se registra sincronización pendiente",
 					"backend", b.Name(), "error", uploadErr)
 				if isR2 {
+					errorStage = "r2_sync"
 					pst.SetPending(config.PlatformCloudflare, true)
 					a.recordEvent(ctx, events.Event{
 						EventID:      events.GenerateID(),
+						RunID:        runID,
 						Timestamp:    time.Now().UTC(),
 						EventType:    events.TypeR2SyncFailed,
 						Status:       events.StatusFailed,
@@ -311,9 +412,11 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 						AgentVersion: version.Current,
 					})
 				} else if isServer {
+					errorStage = "server_sync"
 					pst.SetPending(config.PlatformServer, true)
 					a.recordEvent(ctx, events.Event{
 						EventID:      events.GenerateID(),
+						RunID:        runID,
 						Timestamp:    time.Now().UTC(),
 						EventType:    events.TypeServerSyncFailed,
 						Status:       events.StatusFailed,
@@ -329,11 +432,14 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 				a.logger.Error("falla fatal en backend remoto",
 					"backend", b.Name(), "error", uploadErr)
 				failType := events.TypeR2SyncFailed
+				errorStage = "r2_sync"
 				if isServer {
 					failType = events.TypeServerSyncFailed
+					errorStage = "server_sync"
 				}
 				a.recordEvent(ctx, events.Event{
 					EventID:      events.GenerateID(),
+					RunID:        runID,
 					Timestamp:    time.Now().UTC(),
 					EventType:    failType,
 					Status:       events.StatusFailed,
@@ -351,6 +457,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 				pst.MarkSynced(config.PlatformCloudflare, filepath.Base(finalPath))
 				a.recordEvent(ctx, events.Event{
 					EventID:      events.GenerateID(),
+					RunID:        runID,
 					Timestamp:    time.Now().UTC(),
 					EventType:    events.TypeR2SyncCompleted,
 					Status:       events.StatusSuccess,
@@ -358,7 +465,16 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 					FileName:     filepath.Base(finalPath),
 					AgentVersion: version.Current,
 				})
-				// Reparación D5: keep desde config (default 1) en lugar del literal 1.
+				a.recordArtifact(ctx, events.ArtifactTelemetry{
+					ArtifactID:  events.GenerateArtifactID(),
+					RunID:       runID,
+					Backend:     "cloudflare_r2",
+					Filename:    filepath.Base(finalPath),
+					SizeBytes:   backupSize,
+					SHA256:      sum,
+					IsVerified:  true,
+					StoragePath: fmt.Sprintf("%s/%s", a.cfg.Database, filepath.Base(finalPath)),
+				})
 				if err := b.Rotate(ctx, a.cloudflareKeep()); err != nil {
 					a.logger.Warn("rotación en backend remoto con advertencia",
 						"backend", b.Name(), "error", err)
@@ -367,6 +483,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 				pst.MarkSynced(config.PlatformServer, filepath.Base(finalPath))
 				a.recordEvent(ctx, events.Event{
 					EventID:      events.GenerateID(),
+					RunID:        runID,
 					Timestamp:    time.Now().UTC(),
 					EventType:    events.TypeServerSyncCompleted,
 					Status:       events.StatusSuccess,
@@ -374,12 +491,22 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 					FileName:     filepath.Base(finalPath),
 					AgentVersion: version.Current,
 				})
-				// Reparación D5: keep desde config (default 10) en lugar del literal 10.
+				a.recordArtifact(ctx, events.ArtifactTelemetry{
+					ArtifactID:  events.GenerateArtifactID(),
+					RunID:       runID,
+					Backend:     "remote_unc",
+					Filename:    filepath.Base(finalPath),
+					SizeBytes:   backupSize,
+					SHA256:      sum,
+					IsVerified:  true,
+					StoragePath: filepath.Join(a.cfg.RemoteServer.RemotePath, filepath.Base(finalPath)),
+				})
 				if err := b.Rotate(ctx, a.serverKeep()); err != nil {
 					a.logger.Warn("rotación en backend remoto con advertencia",
 						"backend", b.Name(), "error", err)
 					a.recordEvent(ctx, events.Event{
 						EventID:      events.GenerateID(),
+						RunID:        runID,
 						Timestamp:    time.Now().UTC(),
 						EventType:    events.TypeServerRotationFailed,
 						Status:       events.StatusFailed,
@@ -390,6 +517,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 				} else {
 					a.recordEvent(ctx, events.Event{
 						EventID:      events.GenerateID(),
+						RunID:        runID,
 						Timestamp:    time.Now().UTC(),
 						EventType:    events.TypeServerRotationCompleted,
 						Status:       events.StatusSuccess,
@@ -410,6 +538,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 	if hadPending {
 		a.recordEvent(ctx, events.Event{
 			EventID:      events.GenerateID(),
+			RunID:        runID,
 			Timestamp:    time.Now().UTC(),
 			EventType:    events.TypePendingSync,
 			Status:       events.StatusPending,
@@ -422,6 +551,7 @@ func (a *App) Backup(ctx context.Context, opts BackupOptions) (returnErr error) 
 
 	a.recordEvent(ctx, events.Event{
 		EventID:      events.GenerateID(),
+		RunID:        runID,
 		Timestamp:    time.Now().UTC(),
 		EventType:    events.TypeBackupCompleted,
 		Status:       events.StatusSuccess,

@@ -333,6 +333,74 @@ func isZeroSchedule(s config.ScheduleConfig) bool {
 		s.IntervalMinutes == 0 && s.MaxDurationMin == 0 && s.TaskName == "" && !s.SyncAfterBackup
 }
 
+// recordHost registra o actualiza las especificaciones del equipo en Supabase.
+func (a *App) recordHost(ctx context.Context, host events.HostTelemetry) {
+	if a.eventRepo == nil {
+		return
+	}
+	timeout := 10 * time.Second
+	if a.cfg.Supabase.TimeoutSec > 0 {
+		timeout = time.Duration(a.cfg.Supabase.TimeoutSec) * time.Second
+	}
+	hCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	if err := a.eventRepo.RegisterHost(hCtx, host); err != nil {
+		a.logger.Warn("no se pudo registrar host en Supabase", "host", host.Hostname, "error", err)
+	}
+}
+
+// recordStartRun registra el inicio de la corrida en Supabase con su correlation ID.
+func (a *App) recordStartRun(ctx context.Context, run events.RunTelemetry) {
+	if a.eventRepo == nil {
+		return
+	}
+	timeout := 10 * time.Second
+	if a.cfg.Supabase.TimeoutSec > 0 {
+		timeout = time.Duration(a.cfg.Supabase.TimeoutSec) * time.Second
+	}
+	rCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	if err := a.eventRepo.StartRun(rCtx, run); err != nil {
+		a.logger.Warn("no se pudo iniciar corrida en Supabase", "run_id", run.RunID, "error", err)
+	}
+}
+
+// recordFinishRun actualiza el resultado final de la corrida en Supabase.
+func (a *App) recordFinishRun(ctx context.Context, run events.RunTelemetry) {
+	if a.eventRepo == nil {
+		return
+	}
+	timeout := 10 * time.Second
+	if a.cfg.Supabase.TimeoutSec > 0 {
+		timeout = time.Duration(a.cfg.Supabase.TimeoutSec) * time.Second
+	}
+	rCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	if err := a.eventRepo.FinishRun(rCtx, run); err != nil {
+		a.logger.Warn("no se pudo finalizar corrida en Supabase", "run_id", run.RunID, "error", err)
+	}
+}
+
+// recordArtifact registra un archivo de backup en Supabase.
+func (a *App) recordArtifact(ctx context.Context, artifact events.ArtifactTelemetry) {
+	if a.eventRepo == nil {
+		return
+	}
+	timeout := 10 * time.Second
+	if a.cfg.Supabase.TimeoutSec > 0 {
+		timeout = time.Duration(a.cfg.Supabase.TimeoutSec) * time.Second
+	}
+	aCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	if err := a.eventRepo.RecordArtifact(aCtx, artifact); err != nil {
+		a.logger.Warn("no se pudo registrar artefacto en Supabase", "archivo", artifact.Filename, "backend", artifact.Backend, "error", err)
+	}
+}
+
 // recordEvent registra un evento operativo en Supabase de forma segura y no bloqueante.
 // Si Supabase falla con un error recuperable, el evento se guarda como pendiente en state.json.
 func (a *App) recordEvent(ctx context.Context, evt events.Event) {

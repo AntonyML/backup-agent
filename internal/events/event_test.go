@@ -366,3 +366,91 @@ func TestSupabaseRepository_URLSanitization(t *testing.T) {
 		t.Errorf("ruta esperada /rest/v1/backup_events, se obtuvo: %s", requestedPath)
 	}
 }
+
+func TestSupabaseRepository_NormalizedFlow(t *testing.T) {
+	pathsCalled := make([]string, 0)
+	methodsCalled := make([]string, 0)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pathsCalled = append(pathsCalled, r.URL.Path)
+		methodsCalled = append(methodsCalled, r.Method)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	cfg := config.SupabaseConfig{
+		Enabled: true,
+		URL:     srv.URL,
+	}
+	repo := NewSupabaseRepository(cfg, "test-key", srv.Client())
+	ctx := context.Background()
+
+	// 1. RegisterHost
+	host := HostTelemetry{
+		HostID:   "host_123",
+		Hostname: "TestHost",
+	}
+	if err := repo.RegisterHost(ctx, host); err != nil {
+		t.Fatalf("RegisterHost falló: %v", err)
+	}
+
+	// 2. StartRun
+	run := RunTelemetry{
+		RunID:       "run_abc",
+		HostID:      "host_123",
+		ProfileName: "full",
+	}
+	if err := repo.StartRun(ctx, run); err != nil {
+		t.Fatalf("StartRun falló: %v", err)
+	}
+
+	// 3. Append event
+	evt := Event{
+		EventID:   "evt_1",
+		RunID:     "run_abc",
+		EventType: "backup_started",
+		Status:    "RUNNING",
+	}
+	if err := repo.Append(ctx, evt); err != nil {
+		t.Fatalf("Append falló: %v", err)
+	}
+
+	// 4. RecordArtifact
+	art := ArtifactTelemetry{
+		ArtifactID: "art_1",
+		RunID:      "run_abc",
+		Backend:    "local",
+		Filename:   "test.bak",
+		SizeBytes:  1024,
+		SHA256:     "sha123",
+	}
+	if err := repo.RecordArtifact(ctx, art); err != nil {
+		t.Fatalf("RecordArtifact falló: %v", err)
+	}
+
+	// 5. FinishRun
+	run.Status = StatusSuccess
+	run.DurationMs = 5000
+	if err := repo.FinishRun(ctx, run); err != nil {
+		t.Fatalf("FinishRun falló: %v", err)
+	}
+
+	expectedPaths := []string{
+		"/rest/v1/backup_hosts",
+		"/rest/v1/backup_runs",
+		"/rest/v1/backup_events",
+		"/rest/v1/backup_artifacts",
+		"/rest/v1/backup_runs",
+	}
+	if len(pathsCalled) != len(expectedPaths) {
+		t.Fatalf("se esperaban %d llamadas, hubo %d: %v", len(expectedPaths), len(pathsCalled), pathsCalled)
+	}
+	for i, expected := range expectedPaths {
+		if pathsCalled[i] != expected {
+			t.Errorf("llamada %d: esperaba path %s, dio %s", i, expected, pathsCalled[i])
+		}
+	}
+	if methodsCalled[4] != http.MethodPatch {
+		t.Errorf("FinishRun esperaba método PATCH, dio %s", methodsCalled[4])
+	}
+}

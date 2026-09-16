@@ -1,4 +1,4 @@
-﻿package supabase_test
+package supabase_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,8 +65,8 @@ func TestSupabase_ResilienceLifecycle(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message": "Service Unavailable"}`))
 			return
 		}
-		// Verificar endpoint de PostgREST
-		if r.URL.Path != "/rest/v1/backup_events" {
+		// Verificar endpoint de PostgREST (/rest/v1/*)
+		if !strings.HasPrefix(r.URL.Path, "/rest/v1/") {
 			http.NotFound(w, r)
 			return
 		}

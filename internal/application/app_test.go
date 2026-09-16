@@ -20,8 +20,36 @@ import (
 )
 
 type mockEventRepo struct {
-	events []events.Event
-	err    error
+	events    []events.Event
+	hosts     []events.HostTelemetry
+	runsStart []events.RunTelemetry
+	runsEnd   []events.RunTelemetry
+	artifacts []events.ArtifactTelemetry
+	err       error
+}
+
+func (m *mockEventRepo) RegisterHost(ctx context.Context, host events.HostTelemetry) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.hosts = append(m.hosts, host)
+	return nil
+}
+
+func (m *mockEventRepo) StartRun(ctx context.Context, run events.RunTelemetry) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.runsStart = append(m.runsStart, run)
+	return nil
+}
+
+func (m *mockEventRepo) FinishRun(ctx context.Context, run events.RunTelemetry) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.runsEnd = append(m.runsEnd, run)
+	return nil
 }
 
 func (m *mockEventRepo) Append(ctx context.Context, event events.Event) error {
@@ -29,6 +57,14 @@ func (m *mockEventRepo) Append(ctx context.Context, event events.Event) error {
 		return m.err
 	}
 	m.events = append(m.events, event)
+	return nil
+}
+
+func (m *mockEventRepo) RecordArtifact(ctx context.Context, artifact events.ArtifactTelemetry) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.artifacts = append(m.artifacts, artifact)
 	return nil
 }
 

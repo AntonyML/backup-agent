@@ -38,8 +38,8 @@ func NewSupabaseRepository(cfg config.SupabaseConfig, apiKey string, client *htt
 	}
 }
 
-// Append envía el evento a Supabase vía POST /rest/v1/backup_events con idempotencia garantizada.
-func (r *SupabaseRepository) Append(ctx context.Context, event Event) error {
+// sendRequest ejecuta peticiones HTTP autenticadas hacia PostgREST con manejo de errores y códigos de estado.
+func (r *SupabaseRepository) sendRequest(ctx context.Context, method, endpoint string, payload []byte, prefer string) error {
 	if !r.cfg.Enabled {
 		return ErrDisabled
 	}
@@ -47,39 +47,31 @@ func (r *SupabaseRepository) Append(ctx context.Context, event Event) error {
 		return fmt.Errorf("%w: api_key no proporcionada", ErrAuthFailed)
 	}
 
-	// Completar campos si vienen vacíos
-	if event.EventID == "" {
-		event.EventID = GenerateID()
-	}
-	if event.Timestamp.IsZero() {
-		event.Timestamp = time.Now().UTC()
-	}
-	if event.AgentVersion == "" {
-		event.AgentVersion = version.Current
-	}
-
-	payload, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("serializar evento: %w", err)
-	}
-
 	baseURL := strings.TrimRight(r.cfg.URL, "/")
 	baseURL = strings.TrimSuffix(baseURL, "/rest/v1")
-	url := baseURL + "/rest/v1/backup_events"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	fullURL := baseURL + "/rest/v1" + endpoint
+
+	var bodyReader io.Reader
+	if len(payload) > 0 {
+		bodyReader = bytes.NewReader(payload)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
 	if err != nil {
 		return fmt.Errorf("crear request: %w", err)
 	}
 
+	req.Header.Set("User-Agent", "femucaribe-backup-agent/"+version.Current)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("apikey", r.apiKey)
 	req.Header.Set("Authorization", "Bearer "+r.apiKey)
-	// Idempotencia: resolution=ignore-duplicates ante reintentos de red
-	req.Header.Set("Prefer", "return=minimal,resolution=ignore-duplicates")
+	if prefer != "" {
+		req.Header.Set("Prefer", prefer)
+	}
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("enviar evento a Supabase: %w", err)
+		return fmt.Errorf("enviar petición a Supabase (%s): %w", endpoint, err)
 	}
 	defer resp.Body.Close()
 
@@ -102,6 +94,137 @@ func (r *SupabaseRepository) Append(ctx context.Context, event Event) error {
 	}
 }
 
+// RegisterHost registra o actualiza las especificaciones de hardware y SO del equipo en backup_hosts.
+func (r *SupabaseRepository) RegisterHost(ctx context.Context, host HostTelemetry) error {
+	payload, err := json.Marshal(host)
+	if err != nil {
+		return fmt.Errorf("serializar host: %w", err)
+	}
+	return r.sendRequest(ctx, http.MethodPost, "/backup_hosts", payload, "return=minimal,resolution=merge-duplicates")
+}
+
+// StartRun crea la sesión inicial de la corrida en backup_runs con su Correlation ID (run_id).
+func (r *SupabaseRepository) StartRun(ctx context.Context, run RunTelemetry) error {
+	if run.StartedAt.IsZero() {
+		run.StartedAt = time.Now().UTC()
+	}
+	if run.Status == "" {
+		run.Status = StatusRunning
+	}
+	payload, err := json.Marshal(run)
+	if err != nil {
+		return fmt.Errorf("serializar run: %w", err)
+	}
+	return r.sendRequest(ctx, http.MethodPost, "/backup_runs", payload, "return=minimal,resolution=merge-duplicates")
+}
+
+// FinishRun actualiza el estado final, duración y posibles errores de la corrida en backup_runs.
+func (r *SupabaseRepository) FinishRun(ctx context.Context, run RunTelemetry) error {
+	updateData := map[string]any{
+		"status":      run.Status,
+		"finished_at": run.FinishedAt,
+		"duration_ms": run.DurationMs,
+	}
+	if run.ErrorMessage != "" {
+		updateData["error_message"] = run.ErrorMessage
+	}
+	if run.ErrorStage != "" {
+		updateData["error_stage"] = run.ErrorStage
+	}
+
+	payload, err := json.Marshal(updateData)
+	if err != nil {
+		return fmt.Errorf("serializar actualización de corrida: %w", err)
+	}
+	endpoint := fmt.Sprintf("/backup_runs?run_id=eq.%s", run.RunID)
+	return r.sendRequest(ctx, http.MethodPatch, endpoint, payload, "return=minimal")
+}
+
+// Append envía el evento a Supabase vía POST /rest/v1/backup_events con idempotencia garantizada.
+func (r *SupabaseRepository) Append(ctx context.Context, event Event) error {
+	if event.EventID == "" {
+		event.EventID = GenerateID()
+	}
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now().UTC()
+	}
+
+	details := make(map[string]any)
+	for k, v := range event.Details {
+		details[k] = v
+	}
+	if event.Hostname != "" {
+		details["hostname"] = event.Hostname
+	}
+	if event.DatabaseName != "" {
+		details["database_name"] = event.DatabaseName
+	}
+	if event.FileName != "" {
+		details["filename"] = event.FileName
+	}
+	if event.SizeBytes > 0 {
+		details["size_bytes"] = event.SizeBytes
+	}
+	if event.AgentVersion != "" {
+		details["agent_version"] = event.AgentVersion
+	}
+
+	dto := struct {
+		EventID      string         `json:"event_id"`
+		RunID        *string        `json:"run_id,omitempty"`
+		Timestamp    time.Time      `json:"timestamp"`
+		EventType    string         `json:"event_type"`
+		Status       string         `json:"status"`
+		Backend      *string        `json:"backend,omitempty"`
+		DurationMs   *int64         `json:"duration_ms,omitempty"`
+		ErrorMessage *string        `json:"error_message,omitempty"`
+		Details      map[string]any `json:"details"`
+	}{
+		EventID:   event.EventID,
+		Timestamp: event.Timestamp,
+		EventType: event.EventType,
+		Status:    event.Status,
+		Details:   details,
+	}
+
+	if event.RunID != "" {
+		dto.RunID = &event.RunID
+	}
+	if event.Backend != "" {
+		dto.Backend = &event.Backend
+	}
+	if event.DurationMs > 0 {
+		dto.DurationMs = &event.DurationMs
+	}
+	if event.ErrorMessage != "" {
+		dto.ErrorMessage = &event.ErrorMessage
+	}
+
+	payload, err := json.Marshal(dto)
+	if err != nil {
+		return fmt.Errorf("serializar evento: %w", err)
+	}
+
+	return r.sendRequest(ctx, http.MethodPost, "/backup_events", payload, "return=minimal,resolution=ignore-duplicates")
+}
+
+// RecordArtifact registra un archivo .bak generado y su verificación en backup_artifacts.
+func (r *SupabaseRepository) RecordArtifact(ctx context.Context, artifact ArtifactTelemetry) error {
+	if artifact.ArtifactID == "" {
+		artifact.ArtifactID = GenerateArtifactID()
+	}
+	if artifact.CreatedAt.IsZero() {
+		artifact.CreatedAt = time.Now().UTC()
+	}
+
+	payload, err := json.Marshal(artifact)
+	if err != nil {
+		return fmt.Errorf("serializar artefacto: %w", err)
+	}
+
+	return r.sendRequest(ctx, http.MethodPost, "/backup_artifacts", payload, "return=minimal,resolution=merge-duplicates")
+}
+
 // IsRetryable evalúa si el error devuelto por el repositorio amerita reintento (timeout, 429, error de red, 5xx).
 func IsRetryable(err error) bool {
 	if err == nil {
@@ -112,3 +235,4 @@ func IsRetryable(err error) bool {
 	}
 	return true
 }
+
