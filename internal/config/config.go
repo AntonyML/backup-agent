@@ -57,6 +57,7 @@ type ServerStorageConfig struct {
 type SupabaseConfig struct {
 	Enabled    bool   `json:"enabled"`
 	URL        string `json:"url"`
+	APIKey     string `json:"api_key,omitempty"`
 	TimeoutSec int    `json:"timeout_sec"`
 }
 

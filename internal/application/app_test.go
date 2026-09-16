@@ -851,6 +851,53 @@ func TestGetTUIStatus_Supabase(t *testing.T) {
 	}
 }
 
+func TestApp_SaveSettings_SupabaseHotReload(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "config.json")
+	statePath := filepath.Join(tempDir, "state.json")
+
+	cfg := config.Default()
+	cfg.Supabase.Enabled = false
+	if err := config.Save(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	app := New(Options{
+		Config:     cfg,
+		ConfigPath: cfgPath,
+		StatePath:  statePath,
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+
+	if app.eventRepo != nil {
+		t.Errorf("esperaba eventRepo nil inicialmente")
+	}
+
+	// Guardar con Supabase habilitado y API key
+	newCfg := cfg
+	newCfg.Supabase.Enabled = true
+	newCfg.Supabase.URL = "https://example.supabase.co"
+	newCfg.Supabase.APIKey = "test_key_123"
+
+	if err := app.SaveSettings(newCfg); err != nil {
+		t.Fatalf("SaveSettings falló: %v", err)
+	}
+
+	if app.eventRepo == nil {
+		t.Errorf("esperaba eventRepo inicializado tras SaveSettings con Supabase habilitado y API key")
+	}
+
+	// Guardar con Supabase deshabilitado
+	newCfg.Supabase.Enabled = false
+	if err := app.SaveSettings(newCfg); err != nil {
+		t.Fatalf("SaveSettings falló: %v", err)
+	}
+
+	if app.eventRepo != nil {
+		t.Errorf("esperaba eventRepo nil tras deshabilitar Supabase")
+	}
+}
+
 
 
 

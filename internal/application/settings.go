@@ -1,9 +1,11 @@
 package application
 
 import (
+	"os"
 	"path/filepath"
 
 	"femucaribe-backup-agent/internal/config"
+	"femucaribe-backup-agent/internal/events"
 )
 
 // Settings es la configuración editable del agente expuesta a la capa UI.
@@ -17,6 +19,7 @@ type PlatformServerOverride = config.PlatformServerOverride
 type CloudflareConfig = config.CloudflareConfig
 type ServerStorageConfig = config.ServerStorageConfig
 type ScheduleConfig = config.ScheduleConfig
+type SupabaseConfig = config.SupabaseConfig
 
 const (
 	KindLocal          = config.KindLocal
@@ -53,5 +56,27 @@ func (a *App) SaveSettings(s Settings) error {
 		return err
 	}
 	a.cfg = s
+
+	// Actualizar cliente de eventos Supabase en caliente
+	if s.Supabase.Enabled {
+		apiKey := s.Supabase.APIKey
+		if apiKey == "" {
+			apiKey = os.Getenv("SUPABASE_KEY")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("SUPABASE_API_KEY")
+		}
+		if apiKey == "" {
+			apiKey = os.Getenv("SUPABASE_ACCESS_TOKEN")
+		}
+		if apiKey != "" {
+			a.eventRepo = events.NewSupabaseRepository(s.Supabase, apiKey, nil)
+		} else {
+			a.eventRepo = nil
+		}
+	} else {
+		a.eventRepo = nil
+	}
+
 	return nil
 }

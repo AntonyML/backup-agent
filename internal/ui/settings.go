@@ -150,7 +150,7 @@ type settingsModel struct {
 
 func newSettingsModel(app AppConnector, styles Styles) settingsModel {
 	in := textinput.New()
-	in.CharLimit = 200
+	in.CharLimit = 1024
 	in.SetWidth(48)
 
 	vp := viewport.New()
@@ -341,7 +341,13 @@ func (m *settingsModel) groupSummary(idx int) string {
 		if !m.cfg.Supabase.Enabled {
 			return "Desactivado"
 		}
-		return m.cfg.Supabase.URL
+		keyStatus := "sin API key"
+		if m.cfg.Supabase.APIKey != "" {
+			keyStatus = "API key configurada"
+		} else if os.Getenv("SUPABASE_KEY") != "" || os.Getenv("SUPABASE_API_KEY") != "" || os.Getenv("SUPABASE_ACCESS_TOKEN") != "" {
+			keyStatus = "API key (env)"
+		}
+		return fmt.Sprintf("%s · %s", m.cfg.Supabase.URL, keyStatus)
 	case groupAdvanced:
 		return fmt.Sprintf("Login timeout: %ds · Backup timeout: %ds", m.cfg.LoginTimeoutSec, m.cfg.BackupTimeoutSec)
 	case groupCredentials:
@@ -592,7 +598,22 @@ func (m *settingsModel) observabilityFields() []settingsField {
 			Label: "URL del proyecto Supabase", Kind: kindText,
 			Help: "URL HTTPS del proyecto Supabase que recibe los eventos.",
 			Get:  func(s application.Settings) string { return s.Supabase.URL },
-			Set:  func(s *application.Settings, v string) error { s.Supabase.URL = v; return nil },
+			Set:  func(s *application.Settings, v string) error { s.Supabase.URL = strings.TrimSpace(v); return nil },
+		},
+		{
+			Label: "Clave API de Supabase", Kind: kindPassword,
+			Help: "Token anon o service_role. Se oculta por seguridad; si está vacía busca SUPABASE_KEY.",
+			Get:  func(s application.Settings) string { return s.Supabase.APIKey },
+			Set:  func(s *application.Settings, v string) error { s.Supabase.APIKey = strings.TrimSpace(v); return nil },
+			Display: func(s application.Settings) string {
+				if s.Supabase.APIKey != "" {
+					return "••••••••"
+				}
+				if os.Getenv("SUPABASE_KEY") != "" || os.Getenv("SUPABASE_API_KEY") != "" || os.Getenv("SUPABASE_ACCESS_TOKEN") != "" {
+					return "(hereda SUPABASE_KEY)"
+				}
+				return "(no configurada)"
+			},
 		},
 		{
 			Label: "Timeout HTTP Supabase (s)", Kind: kindInt,
@@ -1916,7 +1937,7 @@ func (m settingsModel) viewFields(b *strings.Builder) {
 				value = boolText(v)
 			}
 		}
-		if f.Kind == kindPassword && value != "" {
+		if f.Kind == kindPassword && value != "" && f.Display == nil {
 			value = "••••••••"
 		}
 

@@ -170,6 +170,15 @@ Por ejemplo: el perfil global guarda 10 copias en el servidor, pero un perfil
 - Si escribe un número: Se activa el override para ese perfil.
 - Si lo deja vacío o en 0: Automáticamente hereda el valor global.
 
+GRUPO OBSERVABILIDAD (SUPABASE):
+Permite enviar automáticamente telemetría y eventos de cada corrida (inicio,
+progreso, éxito o error) a un proyecto Supabase en la nube:
+  - Enviar eventos a Supabase: Activar / desactivar con [Enter].
+  - URL del proyecto Supabase: URL HTTPS (ej. https://xxxx.supabase.co).
+  - Clave API de Supabase: Token anon o service_role. Se oculta por seguridad (••••••••).
+    Si se deja vacía, hereda automáticamente la variable de entorno SUPABASE_KEY.
+  - Timeout HTTP Supabase (s): Tiempo de espera en peticiones (por defecto: 10s).
+
 CÓMO MODIFICAR CUALQUIER CAMPO DE CONFIGURACIÓN:
 1. Posiciónese sobre el campo con las flechas [↑/↓].
 2. Presione [Enter].

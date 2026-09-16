@@ -123,6 +123,7 @@ func TestSupabase_Valid(t *testing.T) {
 		"supabase": {
 			"enabled": true,
 			"url": "https://oxpxyiucnzpedawwkosy.supabase.co",
+			"api_key": "sb_secret_token_123",
 			"timeout_sec": 15
 		}
 	}`
@@ -140,6 +141,9 @@ func TestSupabase_Valid(t *testing.T) {
 	}
 	if cfg.Supabase.URL != "https://oxpxyiucnzpedawwkosy.supabase.co" {
 		t.Errorf("url no coincide: %s", cfg.Supabase.URL)
+	}
+	if cfg.Supabase.APIKey != "sb_secret_token_123" {
+		t.Errorf("api_key no coincide: %s", cfg.Supabase.APIKey)
 	}
 	if cfg.Supabase.TimeoutSec != 15 {
 		t.Errorf("timeout_sec no coincide: %d", cfg.Supabase.TimeoutSec)

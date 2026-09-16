@@ -106,7 +106,7 @@ func (a *App) checkSupabase() PlatformCheck {
 		return PlatformCheck{Name: "Supabase", OK: false, Detail: "no habilitada"}
 	}
 	if a.eventRepo == nil {
-		return PlatformCheck{Name: "Supabase", OK: false, Detail: "API key no configurada (SUPABASE_KEY)"}
+		return PlatformCheck{Name: "Supabase", OK: false, Detail: "API key no configurada (TUI / SUPABASE_KEY)"}
 	}
 	return PlatformCheck{Name: "Supabase", OK: true, Detail: "cliente listo"}
 }

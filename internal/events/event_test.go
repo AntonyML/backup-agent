@@ -342,3 +342,27 @@ func TestSupabaseRepository_MissingAPIKey(t *testing.T) {
 		t.Errorf("se esperaba ErrAuthFailed cuando falta la api_key, recibido %v", err)
 	}
 }
+
+func TestSupabaseRepository_URLSanitization(t *testing.T) {
+	var requestedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	// Probar URL que ya incluye /rest/v1/
+	cfg := config.SupabaseConfig{
+		Enabled: true,
+		URL:     srv.URL + "/rest/v1/",
+	}
+	repo := NewSupabaseRepository(cfg, "test-key", srv.Client())
+
+	err := repo.Append(context.Background(), NewEvent(TypeBackupStarted, StatusRunning))
+	if err != nil {
+		t.Fatalf("Append falló: %v", err)
+	}
+	if requestedPath != "/rest/v1/backup_events" {
+		t.Errorf("ruta esperada /rest/v1/backup_events, se obtuvo: %s", requestedPath)
+	}
+}

@@ -14,6 +14,7 @@
   "supabase": {
     "enabled": false,
     "url": "https://oxpxyiucnzpedawwkosy.supabase.co",
+    "api_key": "",
     "timeout_sec": 10
   }
 }

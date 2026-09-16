@@ -178,7 +178,10 @@ func BuildDefaultApp(exeDir string, cfgPath string, profile string) (*applicatio
 
 	var eventRepo events.EventRepository
 	if cfg.Supabase.Enabled {
-		apiKey := os.Getenv("SUPABASE_KEY")
+		apiKey := cfg.Supabase.APIKey
+		if apiKey == "" {
+			apiKey = os.Getenv("SUPABASE_KEY")
+		}
 		if apiKey == "" {
 			apiKey = os.Getenv("SUPABASE_API_KEY")
 		}
@@ -186,7 +189,7 @@ func BuildDefaultApp(exeDir string, cfgPath string, profile string) (*applicatio
 			apiKey = os.Getenv("SUPABASE_ACCESS_TOKEN")
 		}
 		if apiKey == "" {
-			logger.Warn("supabase habilitado pero no se encontró API key en variables de entorno (SUPABASE_KEY / SUPABASE_API_KEY)")
+			logger.Warn("supabase habilitado pero no se encontró API key en config.json ni en variables de entorno (SUPABASE_KEY / SUPABASE_API_KEY)")
 		} else {
 			eventRepo = events.NewSupabaseRepository(cfg.Supabase, apiKey, nil)
 		}

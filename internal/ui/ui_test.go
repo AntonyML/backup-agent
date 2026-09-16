@@ -457,4 +457,95 @@ func TestSettings_ProfileOverridesFlow(t *testing.T) {
 	}
 }
 
+func TestSettings_SupabaseAPIKey(t *testing.T) {
+	initialSettings := application.Settings{
+		Profiles: []application.Profile{
+			{Name: "full", Kind: application.KindFull},
+		},
+		ActiveProfile: "full",
+		Supabase: application.SupabaseConfig{
+			Enabled: true,
+			URL:     "https://example.supabase.co",
+		},
+	}
+
+	mock := &mockAppConnector{settings: initialSettings}
+	appModel := NewApp(mock, t.TempDir())
+
+	keyPress := func(key string) tea.KeyPressMsg {
+		return tea.KeyPressMsg{Code: []rune(key)[0], Text: key}
+	}
+
+	// 1. Enter Settings
+	m, _ := appModel.Update(keyPress("c"))
+	appModel = m.(AppModel)
+
+	// 2. Navigate to Observabilidad (index 4)
+	for i := 0; i < groupObservability; i++ {
+		m, _ = appModel.Update(keyPress("j"))
+		appModel = m.(AppModel)
+	}
+	if appModel.settings.groupIdx != groupObservability {
+		t.Fatalf("expected groupObservability (4), got %d", appModel.settings.groupIdx)
+	}
+
+	// 3. Enter Observabilidad group
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+	if appModel.settings.level != settingsLevelFields {
+		t.Fatalf("expected settingsLevelFields, got %v", appModel.settings.level)
+	}
+
+	fields := appModel.settings.currentFields()
+	if len(fields) != 4 {
+		t.Fatalf("expected 4 fields in observability, got %d", len(fields))
+	}
+
+	// Field 2 should be "Clave API de Supabase"
+	if fields[2].Label != "Clave API de Supabase" {
+		t.Fatalf("expected field 2 to be 'Clave API de Supabase', got %q", fields[2].Label)
+	}
+	if disp := fields[2].Display(appModel.settings.cfg); disp != "(no configurada)" {
+		t.Errorf("expected '(no configurada)' when empty, got %q", disp)
+	}
+
+	// 4. Move down to field 2
+	m, _ = appModel.Update(keyPress("j"))
+	appModel = m.(AppModel)
+	m, _ = appModel.Update(keyPress("j"))
+	appModel = m.(AppModel)
+	if appModel.settings.fieldIdx != 2 {
+		t.Fatalf("expected fieldIdx 2, got %d", appModel.settings.fieldIdx)
+	}
+
+	// 5. Press Enter to edit
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+	if !appModel.settings.editing {
+		t.Fatalf("expected editing = true")
+	}
+
+	// Set API key value and submit
+	appModel.settings.input.SetValue("sb_test_token_xyz123")
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+
+	if appModel.settings.cfg.Supabase.APIKey != "sb_test_token_xyz123" {
+		t.Fatalf("expected APIKey 'sb_test_token_xyz123', got %q", appModel.settings.cfg.Supabase.APIKey)
+	}
+	if disp := fields[2].Display(appModel.settings.cfg); disp != "••••••••" {
+		t.Errorf("expected '••••••••' when set, got %q", disp)
+	}
+
+	// 6. Save settings with ctrl+s
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 19, Text: "ctrl+s"})
+	appModel = m.(AppModel)
+	if !appModel.settings.saved {
+		t.Errorf("expected saved = true after ctrl+s")
+	}
+	if mock.settings.Supabase.APIKey != "sb_test_token_xyz123" {
+		t.Errorf("expected mock.settings.Supabase.APIKey = 'sb_test_token_xyz123', got %q", mock.settings.Supabase.APIKey)
+	}
+}
+
 

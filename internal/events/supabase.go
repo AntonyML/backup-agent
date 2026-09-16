@@ -63,7 +63,9 @@ func (r *SupabaseRepository) Append(ctx context.Context, event Event) error {
 		return fmt.Errorf("serializar evento: %w", err)
 	}
 
-	url := strings.TrimRight(r.cfg.URL, "/") + "/rest/v1/backup_events"
+	baseURL := strings.TrimRight(r.cfg.URL, "/")
+	baseURL = strings.TrimSuffix(baseURL, "/rest/v1")
+	url := baseURL + "/rest/v1/backup_events"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return fmt.Errorf("crear request: %w", err)
