@@ -23,9 +23,32 @@ CREATE INDEX IF NOT EXISTS idx_backup_events_status ON public.backup_events (sta
 -- Seguridad a nivel de fila (RLS)
 ALTER TABLE public.backup_events ENABLE ROW LEVEL SECURITY;
 
--- Políticas de acceso para servicio autenticado
-CREATE POLICY "Allow insert backup_events" ON public.backup_events
-    FOR INSERT WITH CHECK (true);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'backup_events'
+          AND policyname = 'Allow insert backup_events'
+    ) THEN
+        CREATE POLICY "Allow insert backup_events"
+            ON public.backup_events
+            FOR INSERT
+            WITH CHECK (true);
+    END IF;
 
-CREATE POLICY "Allow select backup_events" ON public.backup_events
-    FOR SELECT USING (true);
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'backup_events'
+          AND policyname = 'Allow select backup_events'
+    ) THEN
+        CREATE POLICY "Allow select backup_events"
+            ON public.backup_events
+            FOR SELECT
+            USING (true);
+    END IF;
+END
+$$;
