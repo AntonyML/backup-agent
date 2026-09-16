@@ -134,7 +134,7 @@ func Default() Config {
 			Storage: SupabaseStorageConfig{
 				Enabled:    false,
 				Bucket:     "backups",
-				Keep:       3,
+				Keep:       30,
 				TimeoutSec: 600,
 			},
 		},

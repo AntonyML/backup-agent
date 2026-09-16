@@ -3,6 +3,7 @@ package supabase_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -166,3 +167,81 @@ func TestSupabaseBackend_RetryableErrors(t *testing.T) {
 	}
 	_ = rErr
 }
+
+func TestSupabaseBackend_Rotate_FIFO_30Keep(t *testing.T) {
+	var mu sync.Mutex
+	objects := make(map[string]bool)
+	var deletedPrefixes []string
+
+	for i := 1; i <= 31; i++ {
+		name := fmt.Sprintf("SIDC_202609%02d_1200.bak", i)
+		objects[name] = true
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/storage/v1/object/list/backups":
+			var items []map[string]any
+			for k := range objects {
+				items = append(items, map[string]any{
+					"name": k,
+					"id":   "id-" + k,
+				})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(items)
+
+		case r.Method == http.MethodDelete && r.URL.Path == "/storage/v1/object/backups":
+			var req struct {
+				Prefixes []string `json:"prefixes"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			for _, p := range req.Prefixes {
+				deletedPrefixes = append(deletedPrefixes, p)
+				// p comes as "SIDC/SIDC_20260901_1200.bak"
+				base := filepath.Base(p)
+				delete(objects, base)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"name":"deleted"}]`))
+
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	client := supabase.NewClient(ts.URL, "test-api-key", 2*time.Second, ts.Client())
+	backend := supabase.NewBackend(client, "backups", "SIDC")
+
+	ctx := context.Background()
+
+	// Hay 31 archivos. Al pedir keep=30, debe borrar exactamente el más antiguo (día 01).
+	if err := backend.Rotate(ctx, 30); err != nil {
+		t.Fatalf("Rotate(30) falló: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(objects) != 30 {
+		t.Fatalf("se esperaban 30 objetos tras rotación, quedaron %d", len(objects))
+	}
+	if len(deletedPrefixes) != 1 {
+		t.Fatalf("se esperaba borrar 1 archivo, se borraron %d", len(deletedPrefixes))
+	}
+	expectedDeleted := "SIDC/SIDC_20260901_1200.bak"
+	if deletedPrefixes[0] != expectedDeleted {
+		t.Fatalf("se eliminó %s, se esperaba %s", deletedPrefixes[0], expectedDeleted)
+	}
+	if objects["SIDC_20260901_1200.bak"] {
+		t.Fatalf("el backup del día 01 debió haber sido eliminado")
+	}
+	if !objects["SIDC_20260931_1200.bak"] {
+		t.Fatalf("el backup del día 31 (más nuevo) debe seguir existiendo")
+	}
+}
+

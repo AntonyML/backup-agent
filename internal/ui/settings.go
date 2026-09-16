@@ -815,12 +815,15 @@ func (m *settingsModel) platformSupabaseFields() []settingsField {
 		},
 		{
 			Label: "Copias en bucket (keep)", Kind: kindInt,
-			Help: "Cantidad de copias retenidas en el bucket de Supabase.",
+			Help: "Retención FIFO en el bucket (ej: 30). Al superar este límite se eliminan automáticamente las copias más viejas.",
 			Get:  func(s application.Settings) string { return strconv.Itoa(s.Supabase.Storage.Keep) },
 			Set: func(s *application.Settings, v string) error {
 				n, err := parseInt(v)
 				if err != nil {
 					return err
+				}
+				if n < 1 {
+					return fmt.Errorf("la cantidad de copias debe ser >= 1")
 				}
 				s.Supabase.Storage.Keep = n
 				return nil

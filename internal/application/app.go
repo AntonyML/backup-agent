@@ -330,7 +330,7 @@ func (a *App) supabaseStorageKeep() int {
 	if a.cfg.Supabase.Storage.Keep > 0 {
 		return a.cfg.Supabase.Storage.Keep
 	}
-	return 3
+	return 30
 }
 
 // supabaseStorageTimeoutSec devuelve el timeout configurado para subidas a Supabase Storage.
