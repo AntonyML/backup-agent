@@ -1,0 +1,328 @@
+===============================================================================
+                    FEMUCARIBE BACKUP AGENT — GUÍA DE USUARIO
+                          MANUAL OPERATIVO DE LA TUI
+===============================================================================
+
+Bienvenido a la guía de uso de FEMUCARIBE Backup Agent.
+Este documento está redactado en lenguaje sencillo y claro para que cualquier
+operador o administrador pueda utilizar la aplicación, entender sus opciones,
+conocer las reglas automáticas de seguridad y resolver dudas frecuentes.
+
+-------------------------------------------------------------------------------
+TABLA DE CONTENIDOS
+-------------------------------------------------------------------------------
+1. ¿QUÉ ES EL AGENTE Y CÓMO SE ABRE?
+2. INTERFAZ VISUAL (TUI) — PANTALLA POR PANTALLA
+   2.1. Menú Principal (Dashboard)
+   2.2. Ejecutar Backup [B]
+   2.3. Estado Detallado y Diagnóstico [S]
+   2.4. Visor de Registros / Logs [L]
+   2.5. Ajustes y Configuración [C]
+   2.6. Sincronización Remota [Y]
+   2.7. Manual de Ayuda Integrado [H]
+3. REGLAS DE NEGOCIO Y SEGURIDAD AUTOMÁTICA
+   3.1. Idempotencia diaria (¿Por qué no repite backups?)
+   3.2. ¿Quién escribe el archivo de backup?
+   3.3. Doble verificación de integridad (RESTORE VERIFYONLY y SHA-256)
+   3.4. Rotación automática de copias
+   3.5. Resiliencia ante caídas de red (Pending Sync)
+   3.6. Exclusión mutua (Lock anti-concurrencia)
+4. PREGUNTAS FRECUENTES (FAQ)
+   - ¿Por qué le doy "Ejecutar" a la tarea en Windows y no genera un archivo nuevo?
+   - ¿Cómo abro el Programador de Tareas en Windows?
+   - ¿Por qué en pruebas con Docker se usa una ruta y en el Servidor otra?
+   - ¿Dónde quedan guardados los archivos de log?
+   - ¿Cómo sé si el backup de hoy funcionó bien?
+   - ¿Qué pasa si se corta la luz o se apaga el equipo a mitad del proceso?
+   - ¿Cómo restauro una copia de seguridad?
+
+===============================================================================
+1. ¿QUÉ ES EL AGENTE Y CÓMO SE ABRE?
+===============================================================================
+
+FEMUCARIBE Backup Agent es una herramienta diseñada para respaldar de forma
+automática, segura y confiable la base de datos SQL Server de la organización,
+conservar copias locales, copiarlas a un servidor de red y sincronizarlas a la
+nube (Cloudflare R2), avisando el resultado a Supabase.
+
+CÓMO ABRIR LA INTERFAZ:
+1. Abra una terminal (PowerShell o Símbolo del sistema).
+2. Diríjase a la carpeta donde está instalado el programa (por ejemplo C:\Backups
+   o C:\DEV\femucaribe-backup-agent\bin).
+3. Ejecute:
+      .\backup-agent.exe
+   o también:
+      .\backup-agent.exe interactive
+
+Se abrirá inmediatamente la pantalla gráfica de terminal (TUI).
+
+===============================================================================
+2. INTERFAZ VISUAL (TUI) — PANTALLA POR PANTALLA
+===============================================================================
+
+2.1. MENÚ PRINCIPAL (DASHBOARD)
+---------------------------------
+Es la vista que aparece al iniciar. Muestra el estado general en tres paneles:
+
+* PANEL "ÚLTIMO BACKUP":
+  - Resultado con color:
+    ● EXITOSO (verde)       -> La última copia se completó al 100%.
+    ● PENDIENTE SYNC (amar) -> Se hizo la copia local, pero falta subir a la nube
+                               o red por falta de conexión temporal.
+    ● ERROR (rojo)          -> Hubo una falla (falta espacio, clave incorrecta).
+    ○ NUNCA EJECUTADO       -> No se registran corridas previas.
+  - Fecha y hora exacta de la última corrida.
+  - Nombre del archivo .bak generado.
+  - Código de verificación criptográfico (SHA-256).
+
+* PANEL "DESTINOS DE ALMACENAMIENTO":
+  Muestra el estado de cada destino configurado:
+  - Local: Disco duro de la máquina local.
+  - Cloudflare R2: Almacenamiento seguro en la nube.
+  - Servidor UNC: Carpeta compartida en otro servidor de la red.
+  - Supabase: Registro en línea para auditoría y alertas.
+
+* PANEL "PERFIL ACTIVO & PROGRAMACIÓN":
+  - Nombre del perfil en uso (ejemplo: "full" o "dev").
+  - Tipo de perfil y destinos que le corresponden.
+  - Próxima corrida programada.
+  - Tarea en Windows: Indica el nombre de la tarea automática registrada
+    en el Programador de tareas de Windows.
+    (Tip: Presione Win + R y escriba taskschd.msc para abrir el programador).
+
+ATAJOS DE TECLADO DESDE EL DASHBOARD:
+  [B] -> Iniciar Backup inmediatamente.
+  [S] -> Ver Estado detallado y diagnóstico de salud (Doctor).
+  [L] -> Ver los Registros (logs) de hoy.
+  [C] -> Entrar a la Configuración y Ajustes.
+  [Y] -> Forzar Sincronización de copias pendientes.
+  [H] -> Abrir la Ayuda integrada.
+  [Q] o [Esc] -> Salir del programa.
+
+
+2.2. EJECUTAR BACKUP [B]
+-------------------------
+Al presionar [B], el agente realiza todo el ciclo en segundo plano sin congelar
+la pantalla. Muestra una animación indicando las etapas:
+  1. Conexión a SQL Server y cálculo de espacio requerido.
+  2. BACKUP DATABASE en SQL Server.
+  3. RESTORE VERIFYONLY (comprobación interna del motor de base de datos).
+  4. Generación de huella digital SHA-256 y rotación de copias locales.
+  5. Envío a destinos remotos (Servidor de red y Cloudflare R2).
+  6. Registro del evento en Supabase.
+Al finalizar, muestra un resumen con tildes verdes [✔] o cruces rojas [✖].
+Presione [Esc] o [Enter] para volver al Dashboard.
+
+
+2.3. ESTADO DETALLADO Y DIAGNÓSTICO [S]
+-----------------------------------------
+Muestra una radiografía técnica del sistema:
+- Parámetros de la base de datos y motor SQL.
+- Estado de conectividad de cada destino de almacenamiento.
+- Diagnóstico automático "Doctor" que verifica si los permisos, carpetas
+  y servicios están listos para trabajar.
+Puede desplazarse por la pantalla con las flechas [↑/↓] o la rueda del ratón.
+Presione [Esc] para volver al Dashboard.
+
+
+2.4. VISOR DE REGISTROS / LOGS [L]
+------------------------------------
+Permite auditar en tiempo real lo que el agente ha hecho hoy:
+- Muestra los mensajes informativos (INFO), advertencias (WARN) y errores (ERROR).
+- Navegación:
+  - Flechas [↑/↓] o rueda del ratón para subir y bajar línea por línea.
+  - [PgUp / PgDn] para avanzar o retroceder páginas enteras.
+  - [R] para refrescar los registros si hay una tarea corriendo.
+  - [Esc] o [Q] para regresar al Dashboard.
+
+
+2.5. AJUSTES Y CONFIGURACIÓN [C]
+---------------------------------
+Permite cambiar cualquier parámetro del agente sin editar archivos a mano.
+La navegación está dividida en 3 niveles:
+
+NIVEL 0: GRUPOS PRINCIPALES
+  - Perfiles de backup
+  - Plataformas de almacenamiento
+  - Programación y Tareas
+  - Base de datos SQL Server
+  - Observabilidad (Supabase)
+  - Concurrencia y Avanzado
+  - Credenciales (R2)
+Use [↑/↓] para seleccionar un grupo y [Enter] para abrirlo.
+
+GESTIÓN DE PERFILES (Dentro del grupo "Perfiles de backup"):
+Permite tener configuraciones distintas (por ejemplo una para producción diaria
+y otra para desarrollo o pruebas locales):
+  [U]     -> Marcar el perfil seleccionado como ACTIVO.
+  [O]     -> Abrir OVERRIDES del perfil (retención y timeouts propios).
+  [N]     -> Crear un NUEVO perfil.
+  [D]     -> DUPLICAR el perfil seleccionado.
+  [R]     -> RENOMBRAR el perfil.
+  [X]     -> ELIMINAR el perfil.
+  [Espacio]-> Marcar/desmarcar qué plataformas remotas utiliza este perfil.
+
+SUBPANTALLA DE OVERRIDES DE PERFIL [O]:
+Permite que un perfil tenga una política de retención o tiempos de espera
+diferentes a la configuración global.
+Por ejemplo: el perfil global guarda 10 copias en el servidor, pero un perfil
+"dev" solo necesita 2 copias.
+- Si escribe un número: Se activa el override para ese perfil.
+- Si lo deja vacío o en 0: Automáticamente hereda el valor global.
+
+CÓMO MODIFICAR CUALQUIER CAMPO DE CONFIGURACIÓN:
+1. Posiciónese sobre el campo con las flechas [↑/↓].
+2. Presione [Enter].
+3. Escriba el nuevo valor (o use [Espacio] en opciones de marcar).
+4. Presione [Enter] para confirmar el valor.
+5. Presione [Ctrl+S] para guardar los cambios a disco (se guarda en config.json).
+6. Presione [Esc] para retroceder un nivel.
+
+
+2.6. SINCRONIZACIÓN REMOTA [Y]
+------------------------------
+Si por un corte de internet o caída de red un backup se guardó en el disco local
+pero no pudo subirse a la nube o al servidor, el agente no descarta la subida:
+la deja marcada como "pendiente".
+Al presionar [Y] en el Dashboard, el agente reintenta inmediatamente subir
+todos los backups pendientes acumulados.
+
+
+2.7. MANUAL DE AYUDA INTEGRADO [H]
+-----------------------------------
+Muestra un visor interactivo con la documentación técnica y operativa
+integrada dentro del mismo ejecutable.
+
+===============================================================================
+3. REGLAS DE NEGOCIO Y SEGURIDAD AUTOMÁTICA
+===============================================================================
+
+3.1. IDEMPOTENCIA DIARIA (¿Por qué no repite backups?)
+-------------------------------------------------------
+REGLA FUNDAMENTAL: "Un mismo perfil de backup solo se ejecuta una vez por día".
+
+¿Por qué existe esta regla?
+Las bases de datos institucionales suelen pesar muchos gigabytes. Si una tarea
+programada de Windows se ejecuta por error dos veces, o si Windows reintenta la
+tarea, o si alguien hace doble clic manual, NO queremos llenar el disco duro
+creando 10 copias idénticas el mismo día.
+
+Si el agente detecta que hoy ya se realizó con éxito un backup para ese perfil:
+- No vuelve a generar otro archivo.
+- Deja una línea en el log: "ya existe backup de hoy para este perfil, no repito".
+- Termina con código de éxito 0.
+
+¿CÓMO FORZAR UN BACKUP EL MISMO DÍA?
+- Desde la interfaz TUI: Presione [B]. La TUI siempre fuerza el backup manual.
+- Desde consola/PowerShell: Agregue el parámetro --force:
+  .\backup-agent.exe backup --unattended --profile full --force
+
+
+3.2. ¿QUIÉN ESCRIBE EL ARCHIVO DE BACKUP?
+------------------------------------------
+El agente NO escribe el archivo .bak.
+El agente se conecta a SQL Server y le envía la orden T-SQL:
+    BACKUP DATABASE [Nombre] TO DISK = 'Ruta\Archivo.bak.tmp'
+
+El que crea y escribe los datos en el disco es el SERVICIO DE SQL SERVER
+(sqlservr.exe). Por eso:
+- El servicio de SQL Server debe tener permisos de escritura en la carpeta destino.
+- Si SQL Server corre en un contenedor Linux (Docker), la ruta debe ser la que
+  el contenedor conoce internamente (/var/opt/mssql/...).
+- En un servidor físico o máquina virtual Windows Server tradicional, SQL Server
+  escribe directamente en C:\Backups\ sin intermediarios.
+
+
+3.3. DOBLE VERIFICACIÓN DE INTEGRIDAD
+--------------------------------------
+Un backup no es confiable solo porque el archivo exista en disco.
+El agente aplica dos filtros estrictos antes de dar por buena la copia:
+1. RESTORE VERIFYONLY: Le pide al propio motor de SQL Server que lea los bloques
+   del archivo temporal y compruebe que no esté corrupto ni truncado.
+2. HASH SHA-256: Calcula una firma digital única de los bytes del archivo.
+   Esta firma permite demostrar en cualquier momento futuro que el archivo no fue
+   modificado ni sufrió daños de disco.
+
+
+3.4. ROTACIÓN AUTOMÁTICA DE COPIAS
+-----------------------------------
+Para evitar que el disco se llene con el paso de los meses, el agente aplica
+rotación automática:
+- Copias locales (C:\Backups): Conserva por defecto las últimas 3 copias.
+- Servidor remoto (UNC): Conserva por defecto las últimas 10 copias.
+- Cloudflare R2 (Nube): Conserva la política definida en la configuración.
+Cada vez que un nuevo backup termina exitosamente, el agente busca los archivos
+más antiguos que superen la cantidad permitida y los elimina de forma segura.
+
+
+3.5. RESILIENCIA ANTE CAÍDAS DE RED (PENDING SYNC)
+---------------------------------------------------
+Si falla el internet o el servidor remoto está apagado:
+- El backup local NUNCA se borra ni se cancela.
+- El agente anota en su archivo de estado que la subida quedó "pendiente".
+- En la siguiente corrida (o al presionar [Y]), reintentará automáticamente
+  subir el archivo que había quedado pendiente.
+
+
+3.6. EXCLUSIÓN MUTUA (LOCK ANTI-CONCURRENCIA)
+----------------------------------------------
+El agente utiliza un archivo de bloqueo (agent-<perfil>.lock).
+Si una tarea automática está corriendo y un usuario abre otra o intenta ejecutar
+un backup al mismo tiempo, el segundo proceso detecta el bloqueo y se detiene
+inmediatamente con un mensaje de advertencia, protegiendo a la base de datos de
+sobrecargas o bloqueos innecesarios.
+
+===============================================================================
+4. PREGUNTAS FRECUENTES (FAQ)
+===============================================================================
+
+P: Le doy "Ejecutar" a la tarea en el Programador de Windows y no aparece ningún
+   archivo nuevo en la carpeta. ¿Qué pasó?
+R: Lo más seguro es que la tarea YA se ejecutó exitosamente hoy.
+   Por la regla de "Idempotencia Diaria", el agente no duplica copias el mismo día.
+   Revise el log en la carpeta "logs" del agente: si dice "ya existe backup de hoy
+   para este perfil, no repito", la tarea funcionó perfectamente.
+   Si necesita probarla nuevamente hoy, puede cambiar temporalmente la fecha
+   en el archivo state.json o ejecutar por terminal con el parámetro --force.
+
+P: ¿Cómo abro el Programador de Tareas en Windows para ver mis tareas?
+R: Presione las teclas Win + R en su teclado, escriba:
+      taskschd.msc
+   y presione Enter. En la Biblioteca del Programador de tareas verá las tareas
+   con el nombre "FEMUCARIBE-Backup-...".
+
+P: ¿Por qué en mi máquina de desarrollo con Docker uso una ruta de Linux y en el
+   servidor Windows usaré C:\Backups?
+R: En Docker, SQL Server corre dentro de un contenedor Linux (Ubuntu), por lo que
+   el motor solo conoce rutas de Linux (ej. /var/opt/mssql/init).
+   En el servidor de producción (Windows Server), SQL Server corre directamente
+   sobre Windows, por lo que conoce directamente rutas como C:\Backups\.
+
+P: ¿Dónde se guardan los archivos de registro (logs)?
+R: Se guardan dentro de la carpeta "logs" junto al archivo ejecutable:
+   logs\agent-YYYY-MM-DD.log (un archivo nuevo por cada día).
+   Los logs se rotan automáticamente y no saturan el sistema.
+
+P: ¿Cómo sé si el backup de hoy funcionó sin entrar a la consola?
+R: Puede comprobarlo de tres formas:
+   1. Abriendo la TUI: El panel superior mostrará el badge verde "● EXITOSO".
+   2. Revisando la carpeta destino: Compruebe la fecha del último archivo .bak.
+   3. En Supabase: En el panel de control web de telemetría de eventos.
+
+P: ¿Qué pasa si se apaga el servidor o se corta la luz mientras se hace el backup?
+R: El agente trabaja con un archivo temporal terminado en ".bak.tmp".
+   Si el proceso se interrumpe abruptamente, el archivo no se renombra a ".bak".
+   En el próximo arranque, el agente detecta los temporales huérfanos y los
+   limpia automáticamente antes de iniciar la nueva corrida, evitando basura en disco.
+
+P: ¿Cómo se restaura una copia de seguridad generada por el agente?
+R: Dado que el agente genera copias estándar de SQL Server (.bak) verificadas
+   con CHECKSUM, la restauración se realiza de forma habitual:
+   - Desde SQL Server Management Studio (SSMS): Clic derecho en Databases ›
+     Restore Database › Device › Seleccionar el archivo .bak.
+   - Mediante comando T-SQL:
+     RESTORE DATABASE [MiBase] FROM DISK = 'C:\Backups\Archivo.bak' WITH RECOVERY;
+
+===============================================================================
+               FEMUCARIBE — SEGURIDAD, CONFIANZA Y CONTINUIDAD
+===============================================================================

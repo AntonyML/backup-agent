@@ -1,6 +1,8 @@
-# FEMUCARIBE Backup Agent — Fase 1, 2, 2.1, 2.2, 3 & 4
+# FEMUCARIBE Backup Agent
 
-Agente de backups para SQL Server `CONTABILIDAD` con arquitectura hexagonal limpia, interfaz gráfica de terminal moderna (**TUI** con Bubble Tea v2, Bubbles v2, Lip Gloss v2 y Glamour v2), subida a **Cloudflare R2** (S3 compatible), copia segura a **Servidor Remoto Windows / UNC** con rotación a 10 copias, observabilidad centralizada en **Supabase** (PostgREST API), protección de credenciales con **Windows DPAPI** y soporte para ejecución desatendida vía Windows Task Scheduler.
+Agente de backups para SQL Server con arquitectura hexagonal limpia, interfaz gráfica de terminal moderna (**TUI** con Bubble Tea v2, Bubbles v2, Lip Gloss v2 y Glamour v2), subida a **Cloudflare R2** (S3 compatible), copia segura a **Servidor Remoto Windows / UNC** con rotación configurable, observabilidad centralizada en **Supabase** (PostgREST API), protección de credenciales con **Windows DPAPI** y soporte para ejecución desatendida vía Windows Task Scheduler.
+
+> 📖 **Manual de Usuario y Operación:** Para consultar la guía de uso de la TUI paso a paso, atajos de teclado, reglas de negocio (idempotencia, rotación, permisos) y resolución de dudas frecuentes, consulte [GUIA_USUARIO.txt](GUIA_USUARIO.txt).
 
 - **Fase 1:** Backup local en `C:\Backups\`, verificación `RESTORE VERIFYONLY`, hash SHA-256 por streaming, lock file contra concurrencia y rotación local (3 copias).
 - **Fase 2:** Subida a **Cloudflare R2** con verificación de integridad por tamaño, rotación remota a 1 copia, gestión segura de credenciales vía **Windows DPAPI** (`config.dat`) y tolerancia a fallos con `pending_sync.r2`.
