@@ -14,6 +14,8 @@ type Profile = config.Profile
 type ProfileOverrides = config.ProfileOverrides
 type PlatformCloudflareOverride = config.PlatformCloudflareOverride
 type PlatformServerOverride = config.PlatformServerOverride
+type CloudflareConfig = config.CloudflareConfig
+type ServerStorageConfig = config.ServerStorageConfig
 type ScheduleConfig = config.ScheduleConfig
 
 const (
