@@ -346,3 +346,115 @@ func TestSettings_CreateProfileDev(t *testing.T) {
 	}
 }
 
+func TestSettings_ProfileOverridesFlow(t *testing.T) {
+	initialSettings := application.Settings{
+		ActiveProfile: "full",
+		Cloudflare: application.CloudflareConfig{
+			Keep:          1,
+			TimeoutSec:    600,
+			UploadRetries: 3,
+		},
+		RemoteServer: application.ServerStorageConfig{
+			Keep:       10,
+			TimeoutSec: 300,
+		},
+		Profiles: []application.Profile{
+			{Name: "full", Kind: application.KindFull, Platforms: []string{"cloudflare", "remote_server"}},
+		},
+		Schedule: application.ScheduleConfig{
+			Enabled: true, Mode: "daily", TimeOfDay: "12:00",
+		},
+	}
+	mock := &mockAppConnector{settings: initialSettings}
+	appModel := NewApp(mock, t.TempDir())
+	keyPress := func(key string) tea.KeyPressMsg {
+		return tea.KeyPressMsg{Code: []rune(key)[0], Text: key}
+	}
+
+	// 1. Enter settings with 'c'
+	m, _ := appModel.Update(keyPress("c"))
+	appModel = m.(AppModel)
+
+	// 2. Enter Perfiles (group 0) with enter
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+	if appModel.settings.level != settingsLevelFields {
+		t.Fatalf("expected settingsLevelFields, got %v", appModel.settings.level)
+	}
+
+	// 3. Press 'o' to open Overrides subscreen
+	m, _ = appModel.Update(keyPress("o"))
+	appModel = m.(AppModel)
+
+	if appModel.settings.level != settingsLevelSub {
+		t.Fatalf("expected settingsLevelSub, got %v", appModel.settings.level)
+	}
+	if appModel.settings.subTitle() != "Overrides: full" {
+		t.Fatalf("expected subTitle 'Overrides: full', got %q", appModel.settings.subTitle())
+	}
+
+	fields := appModel.settings.currentFields()
+	if len(fields) != 5 {
+		t.Fatalf("expected 5 override fields, got %d", len(fields))
+	}
+
+	// Field 0: R2 keep (currently inherited: 1)
+	if disp := fields[0].Display(appModel.settings.cfg); disp != "Heredado (1)" {
+		t.Errorf("expected 'Heredado (1)', got %q", disp)
+	}
+
+	// 4. Press Enter to edit field 0
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+	if !appModel.settings.editing {
+		t.Fatalf("expected editing = true")
+	}
+
+	// Type '7'
+	m, _ = appModel.Update(keyPress("7"))
+	appModel = m.(AppModel)
+
+	// Press Enter to confirm
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+
+	p := appModel.settings.cfg.Profiles[0]
+	if p.Overrides.Cloudflare == nil || p.Overrides.Cloudflare.Keep == nil || *p.Overrides.Cloudflare.Keep != 7 {
+		t.Fatalf("expected Cloudflare.Keep = 7, got %+v", p.Overrides.Cloudflare)
+	}
+
+	fields = appModel.settings.currentFields()
+	if disp := fields[0].Display(appModel.settings.cfg); disp != "7 (override)" {
+		t.Errorf("expected '7 (override)', got %q", disp)
+	}
+
+	// 5. Press Esc to return to profile list
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 27, Text: "esc"})
+	appModel = m.(AppModel)
+	if appModel.settings.level != settingsLevelFields {
+		t.Fatalf("expected settingsLevelFields after Esc, got %v", appModel.settings.level)
+	}
+
+	// 6. Enter Overrides again with 'o'
+	m, _ = appModel.Update(keyPress("o"))
+	appModel = m.(AppModel)
+
+	// 7. Press Enter to edit field 0 again, clear it with backspace, confirm
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+	appModel.settings.input.SetValue("")
+	m, _ = appModel.Update(tea.KeyPressMsg{Code: 13, Text: "enter"})
+	appModel = m.(AppModel)
+
+	p = appModel.settings.cfg.Profiles[0]
+	if p.Overrides.Cloudflare != nil && p.Overrides.Cloudflare.Keep != nil {
+		t.Fatalf("expected Cloudflare.Keep to be nil after clearing, got %v", *p.Overrides.Cloudflare.Keep)
+	}
+
+	fields = appModel.settings.currentFields()
+	if disp := fields[0].Display(appModel.settings.cfg); disp != "Heredado (1)" {
+		t.Errorf("expected 'Heredado (1)' after revert, got %q", disp)
+	}
+}
+
+

@@ -12,6 +12,8 @@ import (
 type Settings = config.Config
 type Profile = config.Profile
 type ProfileOverrides = config.ProfileOverrides
+type PlatformCloudflareOverride = config.PlatformCloudflareOverride
+type PlatformServerOverride = config.PlatformServerOverride
 type ScheduleConfig = config.ScheduleConfig
 
 const (

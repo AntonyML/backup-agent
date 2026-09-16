@@ -44,6 +44,7 @@ type settingsField struct {
 	Options   []string
 	MultiType string // "weekdays" o "platforms"
 	Get       func(application.Settings) string
+	Display   func(application.Settings) string
 	Set       func(*application.Settings, string) error
 }
 
@@ -390,7 +391,7 @@ func (m *settingsModel) subTitle() string {
 		return "Tarea de Windows"
 	case groupProfiles:
 		if m.fieldIdx >= 0 && m.fieldIdx < len(m.cfg.Profiles) {
-			return m.cfg.Profiles[m.fieldIdx].Name
+			return fmt.Sprintf("Overrides: %s", m.cfg.Profiles[m.fieldIdx].Name)
 		}
 	}
 	return ""
@@ -756,6 +757,234 @@ func (m *settingsModel) platformUNCFields() []settingsField {
 	}
 }
 
+func (m *settingsModel) profileOverrideFields() []settingsField {
+	if m.fieldIdx < 0 || m.fieldIdx >= len(m.cfg.Profiles) {
+		return nil
+	}
+	profileIdx := m.fieldIdx
+
+	return []settingsField{
+		{
+			Label: "R2: Copias retenidas (keep)", Kind: kindInt,
+			Help:  fmt.Sprintf("Copias a retener en Cloudflare R2 para este perfil (vacío o 0 = hereda global: %d).", m.cfg.Cloudflare.Keep),
+			Get: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.Cloudflare != nil && s.Profiles[profileIdx].Overrides.Cloudflare.Keep != nil {
+					return strconv.Itoa(*s.Profiles[profileIdx].Overrides.Cloudflare.Keep)
+				}
+				return ""
+			},
+			Display: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.Cloudflare != nil && s.Profiles[profileIdx].Overrides.Cloudflare.Keep != nil {
+					return fmt.Sprintf("%d (override)", *s.Profiles[profileIdx].Overrides.Cloudflare.Keep)
+				}
+				return fmt.Sprintf("Heredado (%d)", s.Cloudflare.Keep)
+			},
+			Set: func(s *application.Settings, v string) error {
+				if profileIdx >= len(s.Profiles) {
+					return fmt.Errorf("perfil no encontrado")
+				}
+				v = strings.TrimSpace(v)
+				if v == "" || v == "0" || strings.EqualFold(v, "heredar") {
+					if s.Profiles[profileIdx].Overrides.Cloudflare != nil {
+						s.Profiles[profileIdx].Overrides.Cloudflare.Keep = nil
+					}
+					m.cleanupOverrides(&s.Profiles[profileIdx])
+					return nil
+				}
+				n, err := parseInt(v)
+				if err != nil {
+					return err
+				}
+				if n < 1 {
+					return fmt.Errorf("la cantidad de copias debe ser >= 1 (o vacío para heredar)")
+				}
+				if s.Profiles[profileIdx].Overrides.Cloudflare == nil {
+					s.Profiles[profileIdx].Overrides.Cloudflare = &application.PlatformCloudflareOverride{}
+				}
+				s.Profiles[profileIdx].Overrides.Cloudflare.Keep = &n
+				return nil
+			},
+		},
+		{
+			Label: "R2: Timeout subida (s)", Kind: kindInt,
+			Help:  fmt.Sprintf("Tiempo límite en segundos para subir a R2 (vacío = hereda global: %d s).", m.cfg.Cloudflare.TimeoutSec),
+			Get: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.Cloudflare != nil && s.Profiles[profileIdx].Overrides.Cloudflare.TimeoutSec != nil {
+					return strconv.Itoa(*s.Profiles[profileIdx].Overrides.Cloudflare.TimeoutSec)
+				}
+				return ""
+			},
+			Display: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.Cloudflare != nil && s.Profiles[profileIdx].Overrides.Cloudflare.TimeoutSec != nil {
+					return fmt.Sprintf("%d s (override)", *s.Profiles[profileIdx].Overrides.Cloudflare.TimeoutSec)
+				}
+				return fmt.Sprintf("Heredado (%d s)", s.Cloudflare.TimeoutSec)
+			},
+			Set: func(s *application.Settings, v string) error {
+				if profileIdx >= len(s.Profiles) {
+					return fmt.Errorf("perfil no encontrado")
+				}
+				v = strings.TrimSpace(v)
+				if v == "" || strings.EqualFold(v, "heredar") {
+					if s.Profiles[profileIdx].Overrides.Cloudflare != nil {
+						s.Profiles[profileIdx].Overrides.Cloudflare.TimeoutSec = nil
+					}
+					m.cleanupOverrides(&s.Profiles[profileIdx])
+					return nil
+				}
+				n, err := parseInt(v)
+				if err != nil {
+					return err
+				}
+				if n < 0 {
+					return fmt.Errorf("el timeout no puede ser negativo")
+				}
+				if s.Profiles[profileIdx].Overrides.Cloudflare == nil {
+					s.Profiles[profileIdx].Overrides.Cloudflare = &application.PlatformCloudflareOverride{}
+				}
+				s.Profiles[profileIdx].Overrides.Cloudflare.TimeoutSec = &n
+				return nil
+			},
+		},
+		{
+			Label: "R2: Reintentos de subida", Kind: kindInt,
+			Help:  fmt.Sprintf("Reintentos en caso de falla transitoria a R2 (vacío = hereda global: %d).", m.cfg.Cloudflare.UploadRetries),
+			Get: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.Cloudflare != nil && s.Profiles[profileIdx].Overrides.Cloudflare.UploadRetries != nil {
+					return strconv.Itoa(*s.Profiles[profileIdx].Overrides.Cloudflare.UploadRetries)
+				}
+				return ""
+			},
+			Display: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.Cloudflare != nil && s.Profiles[profileIdx].Overrides.Cloudflare.UploadRetries != nil {
+					return fmt.Sprintf("%d (override)", *s.Profiles[profileIdx].Overrides.Cloudflare.UploadRetries)
+				}
+				return fmt.Sprintf("Heredado (%d)", s.Cloudflare.UploadRetries)
+			},
+			Set: func(s *application.Settings, v string) error {
+				if profileIdx >= len(s.Profiles) {
+					return fmt.Errorf("perfil no encontrado")
+				}
+				v = strings.TrimSpace(v)
+				if v == "" || strings.EqualFold(v, "heredar") {
+					if s.Profiles[profileIdx].Overrides.Cloudflare != nil {
+						s.Profiles[profileIdx].Overrides.Cloudflare.UploadRetries = nil
+					}
+					m.cleanupOverrides(&s.Profiles[profileIdx])
+					return nil
+				}
+				n, err := parseInt(v)
+				if err != nil {
+					return err
+				}
+				if n < 0 {
+					return fmt.Errorf("los reintentos no pueden ser negativos")
+				}
+				if s.Profiles[profileIdx].Overrides.Cloudflare == nil {
+					s.Profiles[profileIdx].Overrides.Cloudflare = &application.PlatformCloudflareOverride{}
+				}
+				s.Profiles[profileIdx].Overrides.Cloudflare.UploadRetries = &n
+				return nil
+			},
+		},
+		{
+			Label: "UNC: Copias en servidor (keep)", Kind: kindInt,
+			Help:  fmt.Sprintf("Copias retenidas en recurso compartido para este perfil (vacío o 0 = hereda global: %d).", m.cfg.RemoteServer.Keep),
+			Get: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.RemoteServer != nil && s.Profiles[profileIdx].Overrides.RemoteServer.Keep != nil {
+					return strconv.Itoa(*s.Profiles[profileIdx].Overrides.RemoteServer.Keep)
+				}
+				return ""
+			},
+			Display: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.RemoteServer != nil && s.Profiles[profileIdx].Overrides.RemoteServer.Keep != nil {
+					return fmt.Sprintf("%d (override)", *s.Profiles[profileIdx].Overrides.RemoteServer.Keep)
+				}
+				return fmt.Sprintf("Heredado (%d)", s.RemoteServer.Keep)
+			},
+			Set: func(s *application.Settings, v string) error {
+				if profileIdx >= len(s.Profiles) {
+					return fmt.Errorf("perfil no encontrado")
+				}
+				v = strings.TrimSpace(v)
+				if v == "" || v == "0" || strings.EqualFold(v, "heredar") {
+					if s.Profiles[profileIdx].Overrides.RemoteServer != nil {
+						s.Profiles[profileIdx].Overrides.RemoteServer.Keep = nil
+					}
+					m.cleanupOverrides(&s.Profiles[profileIdx])
+					return nil
+				}
+				n, err := parseInt(v)
+				if err != nil {
+					return err
+				}
+				if n < 1 {
+					return fmt.Errorf("la cantidad de copias debe ser >= 1 (o vacío para heredar)")
+				}
+				if s.Profiles[profileIdx].Overrides.RemoteServer == nil {
+					s.Profiles[profileIdx].Overrides.RemoteServer = &application.PlatformServerOverride{}
+				}
+				s.Profiles[profileIdx].Overrides.RemoteServer.Keep = &n
+				return nil
+			},
+		},
+		{
+			Label: "UNC: Timeout de copia (s)", Kind: kindInt,
+			Help:  fmt.Sprintf("Tiempo límite en segundos para copiar a servidor UNC (vacío = hereda global: %d s).", m.cfg.RemoteServer.TimeoutSec),
+			Get: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.RemoteServer != nil && s.Profiles[profileIdx].Overrides.RemoteServer.TimeoutSec != nil {
+					return strconv.Itoa(*s.Profiles[profileIdx].Overrides.RemoteServer.TimeoutSec)
+				}
+				return ""
+			},
+			Display: func(s application.Settings) string {
+				if profileIdx < len(s.Profiles) && s.Profiles[profileIdx].Overrides.RemoteServer != nil && s.Profiles[profileIdx].Overrides.RemoteServer.TimeoutSec != nil {
+					return fmt.Sprintf("%d s (override)", *s.Profiles[profileIdx].Overrides.RemoteServer.TimeoutSec)
+				}
+				return fmt.Sprintf("Heredado (%d s)", s.RemoteServer.TimeoutSec)
+			},
+			Set: func(s *application.Settings, v string) error {
+				if profileIdx >= len(s.Profiles) {
+					return fmt.Errorf("perfil no encontrado")
+				}
+				v = strings.TrimSpace(v)
+				if v == "" || strings.EqualFold(v, "heredar") {
+					if s.Profiles[profileIdx].Overrides.RemoteServer != nil {
+						s.Profiles[profileIdx].Overrides.RemoteServer.TimeoutSec = nil
+					}
+					m.cleanupOverrides(&s.Profiles[profileIdx])
+					return nil
+				}
+				n, err := parseInt(v)
+				if err != nil {
+					return err
+				}
+				if n < 0 {
+					return fmt.Errorf("el timeout no puede ser negativo")
+				}
+				if s.Profiles[profileIdx].Overrides.RemoteServer == nil {
+					s.Profiles[profileIdx].Overrides.RemoteServer = &application.PlatformServerOverride{}
+				}
+				s.Profiles[profileIdx].Overrides.RemoteServer.TimeoutSec = &n
+				return nil
+			},
+		},
+	}
+}
+
+func (m *settingsModel) cleanupOverrides(p *application.Profile) {
+	if p.Overrides.Cloudflare != nil {
+		if p.Overrides.Cloudflare.Keep == nil && p.Overrides.Cloudflare.TimeoutSec == nil && p.Overrides.Cloudflare.UploadRetries == nil {
+			p.Overrides.Cloudflare = nil
+		}
+	}
+	if p.Overrides.RemoteServer != nil {
+		if p.Overrides.RemoteServer.Keep == nil && p.Overrides.RemoteServer.TimeoutSec == nil {
+			p.Overrides.RemoteServer = nil
+		}
+	}
+}
+
 func (m *settingsModel) currentFields() []settingsField {
 	switch m.level {
 	case settingsLevelFields:
@@ -780,6 +1009,8 @@ func (m *settingsModel) currentFields() []settingsField {
 			case 2:
 				return m.platformUNCFields()
 			}
+		case groupProfiles:
+			return m.profileOverrideFields()
 		}
 	}
 	return nil
@@ -788,7 +1019,7 @@ func (m *settingsModel) currentFields() []settingsField {
 func (m *settingsModel) currentField() *settingsField {
 	fields := m.currentFields()
 	idx := m.fieldIdx
-	if m.level == settingsLevelSub && m.groupIdx == groupPlatforms {
+	if m.level == settingsLevelSub && (m.groupIdx == groupPlatforms || m.groupIdx == groupProfiles) {
 		idx = m.subIdx
 	}
 	if idx < 0 || idx >= len(fields) {
@@ -984,6 +1215,16 @@ func (m *settingsModel) update(msg tea.Msg) (*settingsModel, tea.Cmd) {
 			m.deleteProfile()
 			return m, nil
 		}
+	case "o", "O":
+		if m.level == settingsLevelFields && m.groupIdx == groupProfiles {
+			if m.fieldIdx >= 0 && m.fieldIdx < len(m.cfg.Profiles) {
+				m.level = settingsLevelSub
+				m.subIdx = 0
+				m.viewport.GotoTop()
+				m.updateViewportContent()
+				return m, nil
+			}
+		}
 
 	// Atajos contextuales para Plataformas / Tareas (Probar conexión, Credenciales, Instalar tarea)
 	case "t", "T":
@@ -1041,7 +1282,7 @@ func (m *settingsModel) move(delta int) {
 		}
 	case settingsLevelSub:
 		switch m.groupIdx {
-		case groupPlatforms:
+		case groupPlatforms, groupProfiles:
 			fields := m.currentFields()
 			if len(fields) > 0 {
 				m.subIdx = (m.subIdx + delta + len(fields)) % len(fields)
@@ -1582,12 +1823,26 @@ func (m settingsModel) viewProfiles(b *strings.Builder) {
 		platforms := append([]string{"local"}, p.Platforms...)
 		platStr := strings.Join(platforms, ", ")
 
-		b.WriteString(fmt.Sprintf("%s%-18s  %-12s  [tipo: %-7s]  [destinos: %s]\n",
-			cursor, name, activeMarker, p.Kind, platStr))
+		overridesSummary := ""
+		if p.Overrides.Cloudflare != nil || p.Overrides.RemoteServer != nil {
+			var ovParts []string
+			if p.Overrides.Cloudflare != nil && (p.Overrides.Cloudflare.Keep != nil || p.Overrides.Cloudflare.TimeoutSec != nil || p.Overrides.Cloudflare.UploadRetries != nil) {
+				ovParts = append(ovParts, "R2")
+			}
+			if p.Overrides.RemoteServer != nil && (p.Overrides.RemoteServer.Keep != nil || p.Overrides.RemoteServer.TimeoutSec != nil) {
+				ovParts = append(ovParts, "UNC")
+			}
+			if len(ovParts) > 0 {
+				overridesSummary = s.Warning.Render(fmt.Sprintf("  [overrides: %s]", strings.Join(ovParts, "/")))
+			}
+		}
+
+		b.WriteString(fmt.Sprintf("%s%-18s  %-12s  [tipo: %-7s]  [destinos: %s]%s\n",
+			cursor, name, activeMarker, p.Kind, platStr, overridesSummary))
 		b.WriteString("\n")
 	}
 
-	b.WriteString(s.Muted.Render("Atajos: [U] Usar activo  [N] Nuevo  [D] Duplicar  [R] Renombrar  [X] Eliminar"))
+	b.WriteString(s.Muted.Render("Atajos: [U] Usar activo  [O] Overrides  [N] Nuevo  [D] Duplicar  [R] Renombrar  [X] Eliminar"))
 	b.WriteString("\n")
 }
 
@@ -1642,7 +1897,7 @@ func (m settingsModel) viewFields(b *strings.Builder) {
 	}
 
 	curIdx := m.fieldIdx
-	if m.level == settingsLevelSub && m.groupIdx == groupPlatforms {
+	if m.level == settingsLevelSub && (m.groupIdx == groupPlatforms || m.groupIdx == groupProfiles) {
 		curIdx = m.subIdx
 	}
 
@@ -1650,6 +1905,9 @@ func (m settingsModel) viewFields(b *strings.Builder) {
 		selected := i == curIdx
 		label := f.Label
 		value := f.Get(m.cfg)
+		if f.Display != nil {
+			value = f.Display(m.cfg)
+		}
 
 		if f.Kind == kindBool {
 			if v, err := parseBool(value); err == nil {
@@ -1693,7 +1951,7 @@ func (m settingsModel) viewFields(b *strings.Builder) {
 		}
 	}
 
-	// Atajos contextuales en plataformas
+	// Atajos contextuales en plataformas y perfiles
 	if m.level == settingsLevelSub && m.groupIdx == groupPlatforms {
 		if m.fieldIdx == 1 {
 			b.WriteString(s.Muted.Render("Atajos: [T] Probar conexión R2  [C] Cargar credenciales R2"))
@@ -1702,6 +1960,9 @@ func (m settingsModel) viewFields(b *strings.Builder) {
 			b.WriteString(s.Muted.Render("Atajos: [T] Probar acceso UNC"))
 			b.WriteString("\n")
 		}
+	} else if m.level == settingsLevelSub && m.groupIdx == groupProfiles {
+		b.WriteString(s.Muted.Render("Atajos: [Enter] Editar  [Esc] Volver a perfiles  (dejá el campo vacío para heredar)"))
+		b.WriteString("\n")
 	} else if m.level == settingsLevelFields && m.groupIdx == groupSchedule {
 		b.WriteString(s.Muted.Render("Atajos: [T] Gestionar tarea en Windows"))
 		b.WriteString("\n")
