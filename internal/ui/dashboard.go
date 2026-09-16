@@ -156,7 +156,7 @@ func (m dashboardModel) renderProfilePanel(targetWidth int) string {
 			b.WriteString(fmt.Sprintf("%s %s\n", s.Label.Render("Próxima corrida:"), s.Value.Render(m.profile.NextRun)))
 		}
 		if m.profile.TaskName != "" {
-			b.WriteString(fmt.Sprintf("%s %s\n", s.Label.Render("Tarea Windows:"), s.Value.Render(m.profile.TaskName)))
+			b.WriteString(fmt.Sprintf("%s %s  %s\n", s.Label.Render("Tarea Windows:"), s.Value.Render(m.profile.TaskName), s.Muted.Render("(ver con Win+R: taskschd.msc)")))
 		}
 	} else {
 		b.WriteString(s.Muted.Render("Perfil no configurado"))

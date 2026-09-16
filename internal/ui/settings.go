@@ -1884,6 +1884,8 @@ func (m settingsModel) viewWindowsTaskSub(b *strings.Builder) {
 	b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Label.Render("Estado actual:  "), s.Value.Render(m.taskStatusText)))
 
 	b.WriteString(s.Desc.Render("Esta acción instala o actualiza el ejecutable en el Programador de Tareas."))
+	b.WriteString("\n")
+	b.WriteString(s.Muted.Render("Tip: Podés abrir el Programador de Tareas en Windows ejecutando Win + R › taskschd.msc"))
 	b.WriteString("\n\n")
 	b.WriteString(s.Muted.Render("Atajos: [I] Instalar tarea  [D] Eliminar tarea  [Esc] Volver a Programación"))
 	b.WriteString("\n")
