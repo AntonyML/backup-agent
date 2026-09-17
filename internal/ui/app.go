@@ -4,6 +4,7 @@ import (
 	"context"
 
 	tea "charm.land/bubbletea/v2"
+	"femucaribe-backup-agent/internal/auth"
 )
 
 type screen int
@@ -17,11 +18,13 @@ const (
 	screenSettings
 	screenConfigure
 	screenHelp
+	screenLogin
 )
 
 type AppModel struct {
 	app       AppConnector
 	exeDir    string
+	authMgr   *auth.Manager
 	styles    Styles
 	screen    screen
 	dashboard dashboardModel
@@ -32,19 +35,31 @@ type AppModel struct {
 	settings  settingsModel
 	config    configureModel
 	help      helpModel
+	login     loginModel
 	width     int
 	height    int
 }
 
 // NewApp crea el modelo raíz de Bubble Tea para la interfaz TUI.
-func NewApp(app AppConnector, exeDir string) AppModel {
+func NewApp(app AppConnector, exeDir string, authMgr ...*auth.Manager) AppModel {
 	styles := DefaultStyles()
+
+	var mgr *auth.Manager
+	if len(authMgr) > 0 {
+		mgr = authMgr[0]
+	}
+
+	initialScreen := screenDashboard
+	if mgr != nil && !mgr.IsAuthenticated(context.Background()) {
+		initialScreen = screenLogin
+	}
 
 	return AppModel{
 		app:       app,
 		exeDir:    exeDir,
+		authMgr:   mgr,
 		styles:    styles,
-		screen:    screenDashboard,
+		screen:    initialScreen,
 		dashboard: newDashboardModel(styles),
 		backup:    newBackupProgressModel(styles),
 		sync:      newSyncProgressModel(styles),
@@ -53,6 +68,7 @@ func NewApp(app AppConnector, exeDir string) AppModel {
 		settings:  newSettingsModel(app, styles),
 		config:    newConfigureModel(app, styles),
 		help:      newHelpModel(styles),
+		login:     newLoginModel(mgr, styles),
 	}
 }
 
@@ -69,6 +85,9 @@ func (m *AppModel) refreshDashboard() {
 		}
 		m.dashboard.setProfile(m.app.ActiveProfileDetail())
 	}
+	if m.authMgr != nil {
+		m.dashboard.setCurrentUser(m.authMgr.CurrentUser(context.Background()))
+	}
 }
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -81,6 +100,19 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status.setSize(msg.Width, msg.Height)
 		m.logs.setSize(msg.Width, msg.Height)
 		m.help.setSize(msg.Width, msg.Height)
+		m.login.setSize(msg.Width, msg.Height)
+		return m, nil
+
+	case loginSuccessMsg:
+		m.screen = screenDashboard
+		m.refreshDashboard()
+		return m, nil
+
+	case logoutMsg:
+		if m.authMgr != nil {
+			_ = m.authMgr.Logout()
+		}
+		m.screen = screenLogin
 		return m, nil
 
 	case openCredentialsMsg:
@@ -109,6 +141,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Salir global con Ctrl+C
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+
+		// En pantalla de Login: delegar exclusivamente al modelo de autenticación
+		if m.screen == screenLogin {
+			var cmd tea.Cmd
+			m.login, cmd = m.login.update(msg)
+			return m, cmd
 		}
 
 		// En el Dashboard: atajos principales
@@ -145,6 +184,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "h", "H", "?":
 				m.screen = screenHelp
+				return m, nil
+			case "x", "X":
+				if m.authMgr != nil {
+					_ = m.authMgr.Logout()
+				}
+				m.screen = screenLogin
 				return m, nil
 			case "q", "Q":
 				return m, tea.Quit
@@ -201,6 +246,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Delegar actualización a la pantalla activa
 	var cmd tea.Cmd
 	switch m.screen {
+	case screenLogin:
+		m.login, cmd = m.login.update(msg)
 	case screenBackupProgress:
 		m.backup, cmd = m.backup.update(msg)
 	case screenSyncProgress:
@@ -231,6 +278,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m AppModel) View() tea.View {
 	var content string
 	switch m.screen {
+	case screenLogin:
+		content = m.login.view()
 	case screenDashboard:
 		content = m.dashboard.view()
 	case screenBackupProgress:

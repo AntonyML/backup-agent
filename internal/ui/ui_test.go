@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"femucaribe-backup-agent/internal/application"
+	"femucaribe-backup-agent/internal/auth"
 	"femucaribe-backup-agent/internal/secrets"
 )
 
@@ -34,7 +35,7 @@ func TestDashboard_RenderStates(t *testing.T) {
 
 	view := dash.view()
 
-	if !strings.Contains(view, "FEMUCARIBE BACKUP AGENT") {
+	if !strings.Contains(view, "BACKUP AGENT") {
 		t.Errorf("título no presente en dashboard view")
 	}
 	if !strings.Contains(view, "EXITOSO") {
@@ -547,5 +548,52 @@ func TestSettings_SupabaseAPIKey(t *testing.T) {
 		t.Errorf("expected mock.settings.Supabase.APIKey = 'sb_test_token_xyz123', got %q", mock.settings.Supabase.APIKey)
 	}
 }
+
+func TestAppModel_LoginFlow(t *testing.T) {
+	tempDir := t.TempDir()
+	sessFile := filepath.Join(tempDir, "session.json")
+	mgr := auth.NewManager("http://127.0.0.1:54321", "test-key", sessFile, nil)
+
+	// 1. Con un auth.Manager sin sesión, debe iniciar en screenLogin
+	appModel := NewApp(nil, tempDir, mgr)
+	if appModel.screen != screenLogin {
+		t.Fatalf("esperaba screenLogin inicial cuando no hay sesión, dio %v", appModel.screen)
+	}
+
+	view := appModel.View().Content
+	if !strings.Contains(view, "BACKUP AGENT ENTERPRISE") || !strings.Contains(view, "Correo electrónico") {
+		t.Errorf("vista de login no contiene elementos esperados:\n%s", view)
+	}
+
+	// 2. Simular login exitoso mediante loginSuccessMsg
+	sess := &auth.Session{
+		AccessToken: "test-token",
+		User: auth.User{
+			ID:    "user-1",
+			Email: "admin@empresa.com",
+		},
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+	_ = auth.SaveSession(sessFile, sess)
+
+	m, _ := appModel.Update(loginSuccessMsg{Session: sess})
+	appModel = m.(AppModel)
+
+	if appModel.screen != screenDashboard {
+		t.Fatalf("esperaba transición a screenDashboard tras loginSuccessMsg, dio %v", appModel.screen)
+	}
+
+	// 3. Cerrar sesión con tecla 'x' en el Dashboard
+	keyPress := func(key string) tea.KeyPressMsg {
+		return tea.KeyPressMsg{Code: []rune(key)[0], Text: key}
+	}
+	m, _ = appModel.Update(keyPress("x"))
+	appModel = m.(AppModel)
+
+	if appModel.screen != screenLogin {
+		t.Fatalf("esperaba volver a screenLogin tras cerrar sesión con 'x', dio %v", appModel.screen)
+	}
+}
+
 
 

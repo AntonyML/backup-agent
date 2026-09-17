@@ -14,6 +14,7 @@ type dashboardModel struct {
 	backupStatus application.BackupStatus
 	backends     []application.BackendStatus
 	profile      application.ProfileDetail
+	currentUser  string
 	width        int
 	height       int
 }
@@ -38,13 +39,23 @@ func (m *dashboardModel) setProfile(detail application.ProfileDetail) {
 	m.profile = detail
 }
 
+func (m *dashboardModel) setCurrentUser(user string) {
+	m.currentUser = user
+}
+
 func (m dashboardModel) renderHeader() string {
 	s := m.styles
-	title := s.AppTitle.Render("FEMUCARIBE BACKUP AGENT")
+	title := s.AppTitle.Render("BACKUP AGENT ENTERPRISE")
 	ver := s.Subtitle.Render("v" + version.Current + " (Charm TUI)")
+	var badges []string
 	if m.profile.Name != "" {
-		badge := s.BadgeInfo.Render("PERFIL: " + strings.ToUpper(m.profile.Name))
-		return fmt.Sprintf("%s  %s  %s\n\n", title, badge, ver)
+		badges = append(badges, s.BadgeInfo.Render("PERFIL: "+strings.ToUpper(m.profile.Name)))
+	}
+	if m.currentUser != "" {
+		badges = append(badges, s.BadgeSuccess.Render("OPERADOR: "+m.currentUser))
+	}
+	if len(badges) > 0 {
+		return fmt.Sprintf("%s  %s  %s\n\n", title, strings.Join(badges, "  "), ver)
 	}
 	return fmt.Sprintf("%s  %s\n\n", title, ver)
 }
@@ -179,6 +190,7 @@ func (m dashboardModel) renderFooter(targetWidth int) string {
 		fmt.Sprintf("%s %s", s.Key.Render("[C]"), s.Desc.Render("Config")),
 		fmt.Sprintf("%s %s", s.Key.Render("[Y]"), s.Desc.Render("Sync")),
 		fmt.Sprintf("%s %s", s.Key.Render("[H]"), s.Desc.Render("Ayuda")),
+		fmt.Sprintf("%s %s", s.Key.Render("[X]"), s.Desc.Render("Cerrar Sesión")),
 		fmt.Sprintf("%s %s", s.Key.Render("[Q]"), s.Desc.Render("Salir")),
 	}
 	innerWidth := targetWidth - 4

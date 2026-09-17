@@ -1,0 +1,84 @@
+ACUERDO DE LICENCIA DE USUARIO FINAL (EULA) Y TÉRMINOS DE USO
+SOFTWARE PROPIETARIO — TODOS LOS DERECHOS RESERVADOS
+
+Copyright © 2026 Antony Monge López — Costa Rica — Céd. 604700548
+
+Titular: Antony Monge López (en adelante, "el Titular").
+Software: Backup Agent Enterprise (en adelante, "el Software"), incluidos su código fuente,
+documentación, interfaz TUI, scripts, archivos de configuración, instaladores y binarios ejecutables.
+
+POR FAVOR, LEA DETENIDAMENTE ESTE ACUERDO ANTES DE INSTALAR O UTILIZAR EL SOFTWARE.
+AL MARCAR "ACEPTO EL ACUERDO", INSTALAR, COPIAR O UTILIZAR CUALQUIER PARTE DEL SOFTWARE,
+USTED O LA ENTIDAD QUE REPRESENTA (EN ADELANTE, "EL USUARIO" O "EL LICENCIATARIO")
+ACEPTA QUEDAR OBLIGADO POR TODOS LOS TÉRMINOS Y CONDICIONES DE ESTE ACUERDO.
+
+-------------------------------------------------------------------------------
+1. TITULARIDAD Y PROPIEDAD INTELECTUAL
+-------------------------------------------------------------------------------
+El Software es una obra original y propiedad intelectual exclusiva del Titular.
+El Software no se vende; se otorga bajo licencia limitada de uso. El Titular conserva
+todos los derechos, títulos e intereses sobre el Software, incluyendo, sin limitación,
+todos los derechos de autor, marcas, patentes, secretos comerciales y demás derechos
+de propiedad industrial e intelectual reconocidos internacionalmente.
+
+-------------------------------------------------------------------------------
+2. CONCESIÓN DE LICENCIA LIMITADA
+-------------------------------------------------------------------------------
+Sujeto al cumplimiento estricto de este Acuerdo y al pago de las tarifas de licencia
+comercial acordadas directamente con el Titular:
+  a) Se otorga al Licenciatario una licencia no exclusiva, intransferible, revocable y
+     limitada para instalar y ejecutar el Software únicamente en los servidores y entornos
+     autorizados por escrito por el Titular.
+  b) Esta licencia no concede ningún derecho sobre el código fuente ni autoriza su uso
+     por entidades o terceros no designados expresamente en el acuerdo comercial.
+
+-------------------------------------------------------------------------------
+3. PROHIBICIONES ESTRICTAS
+-------------------------------------------------------------------------------
+Queda expresamente prohibido al Usuario, y este se compromete a no permitir a ningún tercero:
+  a) Vender, revender, sublicenciar, alquilar, arrendar, prestar, ceder, distribuir o
+     transferir el Software o cualquier copia del mismo a terceros, bajo cualquier título;
+  b) Modificar, descompilar, realizar ingeniería inversa, desensamblar, desarmar o intentar
+     derivar el código fuente o la arquitectura interna del Software;
+  c) Traducir, adaptar o crear obras derivadas basadas total o parcialmente en el Software;
+  d) Compartir, publicar o poner a disposición del público el binario, instalador, claves de
+     acceso, tokens de autenticación o credenciales provistas por el Titular;
+  e) Eliminar, alterar u ocultar cualquier aviso de derechos de autor, marca registrada o
+     reserva de derechos presente en el Software o su documentación.
+
+-------------------------------------------------------------------------------
+4. CONTROL DE ACCESO Y AUTENTICACIÓN
+-------------------------------------------------------------------------------
+El uso y operación de este Software requiere validación de identidad y credenciales emitidas
+exclusivamente por el Titular a través de los servicios centrales de autenticación. El Titular
+se reserva el derecho de revocar o suspender el acceso ante cualquier intento de uso no
+autorizado o violación de estos términos.
+
+-------------------------------------------------------------------------------
+5. DEPENDENCIAS Y COMPONENTES DE TERCEROS
+-------------------------------------------------------------------------------
+El Software puede utilizar librerías o dependencias de código abierto de terceros (ej. Go,
+Bubble Tea, etc.) distribuidas bajo sus respectivas licencias permisivas (MIT, BSD, Apache 2.0).
+Dichas licencias aplican únicamente a sus respectivos componentes y no otorgan derechos
+sobre la arquitectura propietaria, código fuente propio, ni el ensamblado del Software del Titular.
+
+-------------------------------------------------------------------------------
+6. EXCLUSIÓN DE GARANTÍAS Y LÍMITE DE RESPONSABILIDAD
+-------------------------------------------------------------------------------
+El Software se entrega "TAL CUAL" ("AS IS"), sin garantías de ningún tipo, expresas o implícitas.
+El Titular no garantiza que el funcionamiento sea ininterrumpido o libre de errores. En ningún caso
+el Titular será responsable por pérdidas de datos, lucro cesante o daños derivados de la operación
+indebida o fallas de infraestructura del Licenciatario.
+
+-------------------------------------------------------------------------------
+7. LEY APLICABLE Y JURISDICCIÓN
+-------------------------------------------------------------------------------
+Cualquier infracción a este Acuerdo constituye una violación a la propiedad intelectual del
+Titular y habilitará las acciones civiles y penales pertinentes, de conformidad con la
+Ley de Derechos de Autor y Derechos Conexos de la República de Costa Rica, el Código Penal y
+los tratados internacionales sobre propiedad intelectual (OMPI / Convenio de Berna).
+Cualquier disputa se someterá a los tribunales competentes de la República de Costa Rica.
+
+-------------------------------------------------------------------------------
+Para soporte, adquisición de licencias comerciales o autorizaciones de despliegue:
+Antony Monge López — Costa Rica
