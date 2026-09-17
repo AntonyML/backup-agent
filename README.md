@@ -1,4 +1,4 @@
-# FEMUCARIBE Backup Agent
+# Backup Agent Enterprise
 
 Agente de backups para SQL Server con arquitectura hexagonal limpia, interfaz gráfica de terminal moderna (**TUI** con Bubble Tea v2, Bubbles v2, Lip Gloss v2 y Glamour v2), subida a **Cloudflare R2** (S3 compatible), copia segura a **Servidor Remoto Windows / UNC** con rotación configurable, observabilidad centralizada en **Supabase** (PostgREST API), protección de credenciales con **Windows DPAPI** y soporte para ejecución desatendida vía Windows Task Scheduler.
 

@@ -85,7 +85,7 @@ func NewRootCmd(exeDir string, appProvider func(cfgPath, profile string) (*appli
 
 	cmd := &cobra.Command{
 		Use:   "backup-agent",
-		Short: "Agente de backups FEMUCARIBE",
+		Short: "Agente de backups para SQL Server (Enterprise)",
 		Long:  "Agente de backups para SQL Server con subida a Cloudflare R2 y rotación automática.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Comportamiento del comando raíz sin subcomando:

@@ -20,7 +20,7 @@ var ErrInsufficientSpace = errors.New("sqlbackup: espacio insuficiente en disco"
 const DriverName = "sqlserver"
 
 // appName identifica nuestras conexiones en sys.dm_exec_sessions.
-const appName = "femucaribe-backup-agent"
+const appName = "backup-agent"
 
 // dbNameRe restringe el nombre de base a identificadores simples para
 // poder interpolarlo como [nombre] sin riesgo de inyección SQL.

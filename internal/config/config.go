@@ -112,12 +112,12 @@ type Config struct {
 	ActiveProfile string `json:"active_profile,omitempty"`
 }
 
-// Default devuelve la configuración de producción FEMUCARIBE.
+// Default devuelve la configuración de producción inicial.
 func Default() Config {
 	def := Config{
 		BackupDir:        `C:\Backups\`,
-		Server:           `Caproba01\vbadilla`,
-		Database:         "CONTABILIDAD",
+		Server:           `localhost`,
+		Database:         "EMPRESA_DB",
 		Retain:           3,
 		LoginTimeoutSec:  15,
 		BackupTimeoutSec: 3600,
@@ -151,7 +151,7 @@ func Default() Config {
 			Weekdays:        []string{"mon", "tue", "wed", "thu", "fri"},
 			IntervalMinutes: 60,
 			MaxDurationMin:  90,
-			TaskName:        "FEMUCARIBE-Backup-Diario",
+			TaskName:        "BackupAgent-Diario",
 			SyncAfterBackup: true,
 		},
 	}

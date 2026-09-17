@@ -1,9 +1,9 @@
 ===============================================================================
-                    FEMUCARIBE BACKUP AGENT — GUÍA DE USUARIO
+                    BACKUP AGENT ENTERPRISE — GUÍA DE USUARIO
                           MANUAL OPERATIVO DE LA TUI
 ===============================================================================
 
-Bienvenido a la guía de uso de FEMUCARIBE Backup Agent.
+Bienvenido a la guía de uso de Backup Agent Enterprise.
 Este documento está redactado en lenguaje sencillo y claro para que cualquier
 operador o administrador pueda utilizar la aplicación, entender sus opciones,
 conocer las reglas automáticas de seguridad y resolver dudas frecuentes.
@@ -40,19 +40,19 @@ TABLA DE CONTENIDOS
 1. ¿QUÉ ES EL AGENTE Y CÓMO SE ABRE?
 ===============================================================================
 
-FEMUCARIBE Backup Agent es una herramienta diseñada para respaldar de forma
+Backup Agent Enterprise es una herramienta diseñada para respaldar de forma
 automática, segura y confiable la base de datos SQL Server de la organización,
 conservar copias locales, copiarlas a un servidor de red y sincronizarlas a la
-nube (Cloudflare R2), avisando el resultado a Supabase.
+nube (Supabase Storage / Cloudflare R2), avisando el resultado a Supabase.
 
 CÓMO ABRIR LA INTERFAZ:
 1. Abra una terminal (PowerShell o Símbolo del sistema).
-2. Diríjase a la carpeta donde está instalado el programa (por ejemplo C:\Backups
-   o C:\DEV\femucaribe-backup-agent\bin).
+2. Diríjase a la carpeta donde está instalado el programa (por ejemplo C:\Program Files\BackupAgent
+   o la carpeta de instalación).
 3. Ejecute:
       .\backup-agent.exe
    o también:
-      .\backup-agent.exe interactive
+      .\backup-agent.exe tui
 
 Se abrirá inmediatamente la pantalla gráfica de terminal (TUI).
 
@@ -303,9 +303,9 @@ R: Lo más seguro es que la tarea YA se ejecutó exitosamente hoy.
 
 P: ¿Cómo abro el Programador de Tareas en Windows para ver mis tareas?
 R: Presione las teclas Win + R en su teclado, escriba:
-      taskschd.msc
+       taskschd.msc
    y presione Enter. En la Biblioteca del Programador de tareas verá las tareas
-   con el nombre "FEMUCARIBE-Backup-...".
+   con el nombre "BackupAgent-...".
 
 P: ¿Por qué en mi máquina de desarrollo con Docker uso una ruta de Linux y en el
    servidor Windows usaré C:\Backups?
@@ -352,5 +352,5 @@ R: Dado que el agente genera copias estándar de SQL Server (.bak) verificadas
      RESTORE DATABASE [MiBase] FROM DISK = 'C:\Backups\Archivo.bak' WITH RECOVERY;
 
 ===============================================================================
-               FEMUCARIBE — SEGURIDAD, CONFIANZA Y CONTINUIDAD
+          BACKUP AGENT ENTERPRISE — SEGURIDAD, CONFIANZA Y CONTINUIDAD
 ===============================================================================

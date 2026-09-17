@@ -189,8 +189,9 @@ func TestSpecForProfile_IntegracionConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spec.TaskName != "FEMUCARIBE-Backup-full" {
-		t.Errorf("esperaba convención de nombre, dio %q", spec.TaskName)
+	expectedTaskName := config.TaskNamePrefix + config.InitialProfileName
+	if spec.TaskName != expectedTaskName {
+		t.Errorf("esperaba convención de nombre %q, dio %q", expectedTaskName, spec.TaskName)
 	}
 
 	// Perfil inexistente -> error (mapea a exit 2 en CLI).

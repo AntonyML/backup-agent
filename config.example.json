@@ -1,13 +1,13 @@
 {
   "backup_dir": "C:\\Backups\\",
-  "server": "Caproba01\\vbadilla",
-  "database": "CONTABILIDAD",
+  "server": "localhost",
+  "database": "MI_BASE_DATOS",
   "retain": 3,
   "login_timeout_sec": 15,
   "backup_timeout_sec": 3600,
   "remote_server": {
     "enabled": false,
-    "remote_path": "\\\\ServidorBackup\\Backups\\CONTABILIDAD\\",
+    "remote_path": "\\\\ServidorBackup\\Backups\\MI_BASE_DATOS\\",
     "keep": 10,
     "timeout_sec": 300
   },

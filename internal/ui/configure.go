@@ -29,7 +29,7 @@ func newConfigureModel(app AppConnector, styles Styles) configureModel {
 
 	// 1: Bucket
 	inputs[1] = textinput.New()
-	inputs[1].Placeholder = "femucaribe-backups"
+	inputs[1].Placeholder = "backups"
 	inputs[1].CharLimit = 64
 	inputs[1].SetWidth(50)
 

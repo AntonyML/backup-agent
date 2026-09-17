@@ -61,7 +61,7 @@ func (r *SupabaseRepository) sendRequest(ctx context.Context, method, endpoint s
 		return fmt.Errorf("crear request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "femucaribe-backup-agent/"+version.Current)
+	req.Header.Set("User-Agent", "backup-agent/"+version.Current)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("apikey", r.apiKey)
 	req.Header.Set("Authorization", "Bearer "+r.apiKey)

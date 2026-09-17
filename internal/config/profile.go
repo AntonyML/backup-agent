@@ -100,11 +100,11 @@ func (c Config) ActiveProfileConfig() (Profile, bool) {
 }
 
 // TaskNamePrefix es el prefijo por convención de las tareas de Windows (D2).
-const TaskNamePrefix = "FEMUCARIBE-Backup-"
+const TaskNamePrefix = "BackupAgent-"
 
 // TaskNameForProfile resuelve el nombre de la tarea de Windows de un perfil:
 // el schedule del perfil (o el global heredado) puede fijarlo explícitamente
-// en TaskName; si está vacío se usa la convención "FEMUCARIBE-Backup-<perfil>" (D2).
+// en TaskName; si está vacío se usa la convención "BackupAgent-<perfil>" (D2).
 func (c Config) TaskNameForProfile(name string) string {
 	if p, ok := c.ProfileByName(name); ok {
 		if s := c.EffectiveSchedule(p); strings.TrimSpace(s.TaskName) != "" {

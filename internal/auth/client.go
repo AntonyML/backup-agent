@@ -153,7 +153,7 @@ func (c *Client) RefreshToken(ctx context.Context, refreshToken string) (*Sessio
 }
 
 func (c *Client) setHeaders(req *http.Request) {
-	req.Header.Set("User-Agent", "femucaribe-backup-agent/"+version.Current)
+	req.Header.Set("User-Agent", "backup-agent/"+version.Current)
 	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
 		req.Header.Set("apikey", c.apiKey)

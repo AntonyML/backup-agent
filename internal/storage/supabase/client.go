@@ -231,7 +231,7 @@ func (c *Client) Delete(ctx context.Context, bucket string, prefixes []string) e
 }
 
 func (c *Client) setHeaders(req *http.Request, contentType string) {
-	req.Header.Set("User-Agent", "femucaribe-backup-agent/"+version.Current)
+	req.Header.Set("User-Agent", "backup-agent/"+version.Current)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
