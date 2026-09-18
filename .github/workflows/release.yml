@@ -21,13 +21,56 @@ jobs:
 
       - name: Calcular Próxima Versión Semántica
         id: semver
-        uses: paulhatch/semantic-version@v5
-        with:
-          tag_prefix: "v"
-          major_pattern: "(?i)BREAKING CHANGE|breaking:"
-          minor_pattern: "(?i)feat:|feature:"
-          version_format: "${major}.${minor}.${patch}"
-          default_version: "4.0.0"
+        shell: pwsh
+        run: |
+          $exactTag = git describe --tags --exact-match HEAD 2>$null
+          if ($exactTag) {
+            $version = $exactTag.TrimStart('v')
+            $versionTag = $exactTag
+          } else {
+            $latestTag = git describe --tags --match "v[0-9]*" --abbrev=0 2>$null
+            if (-not $latestTag) {
+              $version = "4.0.0"
+            } else {
+              $clean = $latestTag.TrimStart('v')
+              $parts = $clean.Split('.')
+              $major = [int]$parts[0]
+              $minor = [int]$parts[1]
+              $patch = [int]$parts[2]
+
+              $commits = git log "$latestTag..HEAD" --oneline
+              $isMajor = $false
+              $isMinor = $false
+              $hasCommits = $false
+
+              foreach ($c in $commits) {
+                if (-not [string]::IsNullOrWhiteSpace($c)) {
+                  $hasCommits = $true
+                  if ($c -match "(?i)BREAKING CHANGE|breaking:") {
+                    $isMajor = $true
+                  } elseif ($c -match "(?i)feat(\([^\)]+\))?:") {
+                    $isMinor = $true
+                  }
+                }
+              }
+
+              if ($isMajor) {
+                $major++
+                $minor = 0
+                $patch = 0
+              } elseif ($isMinor) {
+                $minor++
+                $patch = 0
+              } elseif ($hasCommits) {
+                $patch++
+              }
+              $version = "$major.$minor.$patch"
+            }
+            $versionTag = "v$version"
+          }
+          Write-Host "Versión calculada: $version (Tag: $versionTag)"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version_tag=$versionTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Configurar Go
         uses: actions/setup-go@v5
