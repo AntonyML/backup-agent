@@ -96,11 +96,12 @@ func (c *Client) Login(ctx context.Context, email, password string) (*Session, e
 		return nil, fmt.Errorf("decodificar respuesta de sesión: %w", err)
 	}
 
-	if sess.ExpiresIn > 0 {
-		sess.ExpiresAt = time.Now().Add(time.Duration(sess.ExpiresIn) * time.Second)
-	} else {
-		// Por defecto 1 hora si no viene especificado
-		sess.ExpiresAt = time.Now().Add(1 * time.Hour)
+	if sess.ExpiresAt.IsZero() {
+		if sess.ExpiresIn > 0 {
+			sess.ExpiresAt = time.Now().Add(time.Duration(sess.ExpiresIn) * time.Second)
+		} else {
+			sess.ExpiresAt = time.Now().Add(1 * time.Hour)
+		}
 	}
 
 	return &sess, nil
@@ -143,10 +144,12 @@ func (c *Client) RefreshToken(ctx context.Context, refreshToken string) (*Sessio
 		return nil, fmt.Errorf("decodificar sesión renovada: %w", err)
 	}
 
-	if sess.ExpiresIn > 0 {
-		sess.ExpiresAt = time.Now().Add(time.Duration(sess.ExpiresIn) * time.Second)
-	} else {
-		sess.ExpiresAt = time.Now().Add(1 * time.Hour)
+	if sess.ExpiresAt.IsZero() {
+		if sess.ExpiresIn > 0 {
+			sess.ExpiresAt = time.Now().Add(time.Duration(sess.ExpiresIn) * time.Second)
+		} else {
+			sess.ExpiresAt = time.Now().Add(1 * time.Hour)
+		}
 	}
 
 	return &sess, nil

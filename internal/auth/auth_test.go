@@ -170,3 +170,35 @@ func TestAuthManager_SessionPersistenceAndAutoRefresh(t *testing.T) {
 		t.Fatalf("tras Logout no debe estar autenticado")
 	}
 }
+
+func TestSession_UnmarshalNumericExpiresAt(t *testing.T) {
+	// Payload idéntico al que retorna la API real de Supabase GoTrue
+	rawSupabaseJSON := []byte(`{
+		"access_token": "supabase-jwt-access-token",
+		"token_type": "bearer",
+		"expires_in": 3600,
+		"expires_at": 1726685400,
+		"refresh_token": "supabase-refresh-token",
+		"user": {
+			"id": "11111111-2222-3333-4444-555555555555",
+			"email": "operador@empresa.com",
+			"role": "authenticated"
+		}
+	}`)
+
+	var sess auth.Session
+	if err := json.Unmarshal(rawSupabaseJSON, &sess); err != nil {
+		t.Fatalf("Fallo al decodificar JSON con expires_at numérico: %v", err)
+	}
+
+	if sess.AccessToken != "supabase-jwt-access-token" {
+		t.Errorf("token inesperado: %s", sess.AccessToken)
+	}
+	if sess.ExpiresAt.Unix() != 1726685400 {
+		t.Errorf("ExpiresAt inesperado: %v (unix %d)", sess.ExpiresAt, sess.ExpiresAt.Unix())
+	}
+	if sess.User.Email != "operador@empresa.com" {
+		t.Errorf("email inesperado: %s", sess.User.Email)
+	}
+}
+

@@ -35,6 +35,49 @@ type Session struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
+// UnmarshalJSON decodifica la sesión soportando expires_at como número unix (Supabase GoTrue)
+// o como string RFC3339 (sesiones guardadas en disco).
+func (s *Session) UnmarshalJSON(data []byte) error {
+	type Alias Session
+	aux := struct {
+		RawExpiresAt json.RawMessage `json:"expires_at"`
+		*Alias
+	}{
+		Alias: (*Alias)(s),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	if len(aux.RawExpiresAt) > 0 && string(aux.RawExpiresAt) != "null" {
+		// 1. Caso numérico: timestamp unix en segundos (Supabase Auth GoTrue API)
+		var num int64
+		if err := json.Unmarshal(aux.RawExpiresAt, &num); err == nil && num > 0 {
+			s.ExpiresAt = time.Unix(num, 0)
+			return nil
+		}
+		var fnum float64
+		if err := json.Unmarshal(aux.RawExpiresAt, &fnum); err == nil && fnum > 0 {
+			s.ExpiresAt = time.Unix(int64(fnum), 0)
+			return nil
+		}
+		// 2. Caso string: formato RFC3339 (guardado en disco)
+		var t time.Time
+		if err := json.Unmarshal(aux.RawExpiresAt, &t); err == nil {
+			s.ExpiresAt = t
+			return nil
+		}
+	}
+
+	// 3. Fallback: calcular a partir de expires_in
+	if s.ExpiresIn > 0 {
+		s.ExpiresAt = time.Now().Add(time.Duration(s.ExpiresIn) * time.Second)
+	}
+
+	return nil
+}
+
 // IsValid verifica si el token de acceso sigue siendo válido (con 2 minutos de margen de seguridad).
 func (s *Session) IsValid() bool {
 	if s == nil || s.AccessToken == "" {
