@@ -30,6 +30,8 @@ type AppConnector interface {
 	CheckPlatforms(ctx context.Context) []application.PlatformCheck
 	Backup(ctx context.Context, opts application.BackupOptions) error
 	Sync(ctx context.Context, opts application.SyncOptions) error
+	ExportConfiguration(outputPath, password string) error
+	ImportConfiguration(inputPath, password string) error
 }
 
 // compile-time: *application.App satisface AppConnector.

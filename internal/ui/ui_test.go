@@ -179,6 +179,8 @@ func (m *mockAppConnector) CheckPlatforms(ctx context.Context) []application.Pla
 }
 func (m *mockAppConnector) Backup(ctx context.Context, opts application.BackupOptions) error { return nil }
 func (m *mockAppConnector) Sync(ctx context.Context, opts application.SyncOptions) error     { return nil }
+func (m *mockAppConnector) ExportConfiguration(outputPath, password string) error            { return nil }
+func (m *mockAppConnector) ImportConfiguration(inputPath, password string) error             { return nil }
 
 func TestSettings_IntegrationFlow(t *testing.T) {
 	initialSettings := application.Settings{

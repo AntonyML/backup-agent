@@ -12,6 +12,7 @@ import (
 
 	"femucaribe-backup-agent/internal/config"
 	"femucaribe-backup-agent/internal/events"
+	"femucaribe-backup-agent/internal/portability"
 	"femucaribe-backup-agent/internal/sqlbackup"
 	"femucaribe-backup-agent/internal/state"
 	"femucaribe-backup-agent/internal/storage"
@@ -489,6 +490,21 @@ func (a *App) flushPendingEvents(ctx context.Context, st *state.State) {
 
 	st.PendingEvents = remaining
 	_ = state.Save(a.statePath, st)
+}
+
+// ExportConfiguration exporta la configuración y credenciales a un archivo cifrado con contraseña.
+func (a *App) ExportConfiguration(outputPath, password string) error {
+	return portability.Export(a.configPath, a.secretsPath, outputPath, password)
+}
+
+// ImportConfiguration importa una configuración cifrada y re-cifra credenciales con DPAPI local.
+func (a *App) ImportConfiguration(inputPath, password string) error {
+	cfg, err := portability.Import(inputPath, password, a.configPath, a.secretsPath)
+	if err != nil {
+		return err
+	}
+	a.cfg = *cfg
+	return nil
 }
 
 

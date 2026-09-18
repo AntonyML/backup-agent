@@ -14,3 +14,8 @@ El agente utiliza dos archivos de configuración principales:
 - Cifrado mediante **Windows DPAPI** (`CryptProtectData`) bajo la identidad del usuario actual (`CURRENT_USER`).
 - Almacena: `Endpoint`, `Bucket`, `Access Key ID` y `Secret Access Key`.
 - Se puede configurar interactivamente desde la pantalla de Configuración `[C]` o con `backup-agent configure`.
+
+## 3. Portabilidad (`[E]` Exportar / `[I]` Importar)
+- **Exportar (`[E]`)**: Empaqueta `config.json` y las credenciales de R2 en un archivo cifrado con contraseña mediante AES-256-GCM.
+- **Importar (`[I]`)**: Descifra el archivo en otra máquina y re-cifra automáticamente las credenciales con el Windows DPAPI de la máquina destino.
+

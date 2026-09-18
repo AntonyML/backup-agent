@@ -188,6 +188,8 @@ func (m dashboardModel) renderFooter(targetWidth int) string {
 		fmt.Sprintf("%s %s", s.Key.Render("[S]"), s.Desc.Render("Estado")),
 		fmt.Sprintf("%s %s", s.Key.Render("[L]"), s.Desc.Render("Logs")),
 		fmt.Sprintf("%s %s", s.Key.Render("[C]"), s.Desc.Render("Config")),
+		fmt.Sprintf("%s %s", s.Key.Render("[E]"), s.Desc.Render("Exportar")),
+		fmt.Sprintf("%s %s", s.Key.Render("[I]"), s.Desc.Render("Importar")),
 		fmt.Sprintf("%s %s", s.Key.Render("[Y]"), s.Desc.Render("Sync")),
 		fmt.Sprintf("%s %s", s.Key.Render("[H]"), s.Desc.Render("Ayuda")),
 		fmt.Sprintf("%s %s", s.Key.Render("[X]"), s.Desc.Render("Cerrar Sesión")),

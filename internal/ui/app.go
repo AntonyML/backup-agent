@@ -19,25 +19,29 @@ const (
 	screenConfigure
 	screenHelp
 	screenLogin
+	screenExport
+	screenImport
 )
 
 type AppModel struct {
-	app       AppConnector
-	exeDir    string
-	authMgr   *auth.Manager
-	styles    Styles
-	screen    screen
-	dashboard dashboardModel
-	backup    backupProgressModel
-	sync      syncProgressModel
-	status    statusModel
-	logs      logsModel
-	settings  settingsModel
-	config    configureModel
-	help      helpModel
-	login     loginModel
-	width     int
-	height    int
+	app         AppConnector
+	exeDir      string
+	authMgr     *auth.Manager
+	styles      Styles
+	screen      screen
+	dashboard   dashboardModel
+	backup      backupProgressModel
+	sync        syncProgressModel
+	status      statusModel
+	logs        logsModel
+	settings    settingsModel
+	config      configureModel
+	help        helpModel
+	login       loginModel
+	export      exportModalModel
+	importModal importModalModel
+	width       int
+	height      int
 }
 
 // NewApp crea el modelo raíz de Bubble Tea para la interfaz TUI.
@@ -65,10 +69,12 @@ func NewApp(app AppConnector, exeDir string, authMgr ...*auth.Manager) AppModel 
 		sync:      newSyncProgressModel(styles),
 		status:    newStatusModel(app, styles),
 		logs:      newLogsModel(app, styles),
-		settings:  newSettingsModel(app, styles),
-		config:    newConfigureModel(app, styles),
-		help:      newHelpModel(styles),
-		login:     newLoginModel(mgr, styles),
+		settings:    newSettingsModel(app, styles),
+		config:      newConfigureModel(app, styles),
+		help:        newHelpModel(styles),
+		login:       newLoginModel(mgr, styles),
+		export:      newExportModalModel(app, styles),
+		importModal: newImportModalModel(app, styles),
 	}
 }
 
@@ -101,6 +107,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logs.setSize(msg.Width, msg.Height)
 		m.help.setSize(msg.Width, msg.Height)
 		m.login.setSize(msg.Width, msg.Height)
+		m.export.setSize(msg.Width, msg.Height)
+		m.importModal.setSize(msg.Width, msg.Height)
 		return m, nil
 
 	case loginSuccessMsg:
@@ -122,7 +130,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case backToDashboardMsg:
 		m.screen = screenDashboard
+		m.settings.load()
 		m.refreshDashboard()
+		return m, nil
+
+	case exportSuccessMsg, exportFailedMsg:
+		m.export, _ = m.export.update(msg)
+		return m, nil
+
+	case importSuccessMsg, importFailedMsg:
+		m.importModal, _ = m.importModal.update(msg)
+		if _, ok := msg.(importSuccessMsg); ok {
+			m.settings.load()
+			m.refreshDashboard()
+		}
 		return m, nil
 
 	case backupFinishedMsg:
@@ -147,6 +168,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenLogin {
 			var cmd tea.Cmd
 			m.login, cmd = m.login.update(msg)
+			return m, cmd
+		}
+
+		// En pantalla de Exportar: delegar al modal
+		if m.screen == screenExport {
+			var cmd tea.Cmd
+			m.export, cmd = m.export.update(msg)
+			return m, cmd
+		}
+
+		// En pantalla de Importar: delegar al modal
+		if m.screen == screenImport {
+			var cmd tea.Cmd
+			m.importModal, cmd = m.importModal.update(msg)
 			return m, cmd
 		}
 
@@ -182,6 +217,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenSettings
 				m.settings.load()
 				return m, nil
+			case "e", "E":
+				m.screen = screenExport
+				m.export.reset()
+				return m, nil
+			case "i", "I":
+				m.screen = screenImport
+				m.importModal.reset()
+				return m, nil
 			case "h", "H", "?":
 				m.screen = screenHelp
 				return m, nil
@@ -198,7 +241,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// En pantallas secundarias: volver con Esc (o Q si no estamos editando texto/settings)
-		if m.screen != screenSettings && m.screen != screenConfigure {
+		if m.screen != screenSettings && m.screen != screenConfigure && m.screen != screenExport && m.screen != screenImport {
 			if msg.String() == "esc" || msg.String() == "q" {
 				m.screen = screenDashboard
 				m.refreshDashboard()
@@ -248,6 +291,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenLogin:
 		m.login, cmd = m.login.update(msg)
+	case screenExport:
+		m.export, cmd = m.export.update(msg)
+	case screenImport:
+		m.importModal, cmd = m.importModal.update(msg)
 	case screenBackupProgress:
 		m.backup, cmd = m.backup.update(msg)
 	case screenSyncProgress:
@@ -280,6 +327,10 @@ func (m AppModel) View() tea.View {
 	switch m.screen {
 	case screenLogin:
 		content = m.login.view()
+	case screenExport:
+		content = m.export.view()
+	case screenImport:
+		content = m.importModal.view()
 	case screenDashboard:
 		content = m.dashboard.view()
 	case screenBackupProgress:
