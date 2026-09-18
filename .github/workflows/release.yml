@@ -21,7 +21,7 @@ jobs:
 
       - name: Calcular Próxima Versión Semántica
         id: semver
-        uses: paulhatch/semantic-version@v5.4.3
+        uses: paulhatch/semantic-version@v5
         with:
           tag_prefix: "v"
           major_pattern: "(?i)BREAKING CHANGE|breaking:"
@@ -32,20 +32,25 @@ jobs:
       - name: Configurar Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: 'go.mod'
           check-latest: true
 
       - name: Compilar Binario Go con Versión Inyectada
         run: |
+          New-Item -ItemType Directory -Force -Path bin
           $ver = "${{ steps.semver.outputs.version }}"
           Write-Host "Compilando Backup Agent versión $ver..."
           go build -v -ldflags="-s -w -X femucaribe-backup-agent/internal/version.Current=$ver" -o bin/backup-agent.exe ./cmd/backup-agent
 
+      - name: Instalar Inno Setup
+        run: choco install innosetup --no-progress
+
       - name: Compilar Instalador con Inno Setup
-        uses: knopp/github-action-innosetup@v3
-        with:
-          options: /O+ /DMyAppVersion=${{ steps.semver.outputs.version }}
-          filepath: installer.iss
+        run: |
+          $iscc = if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") { "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" } else { "iscc.exe" }
+          $ver = "${{ steps.semver.outputs.version }}"
+          Write-Host "Compilando instalador Inno Setup con versión $ver..."
+          & $iscc /O+ /DMyAppVersion=$ver installer.iss
 
       - name: Subir Instalador y Binario como Artefactos
         uses: actions/upload-artifact@v4

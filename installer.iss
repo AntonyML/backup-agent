@@ -45,7 +45,7 @@ Source: "public\icon\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Licencia y Términos y Condiciones
 Source: "TERMS_AND_CONDITIONS.txt"; DestDir: "{app}"; Flags: ignoreversion
 ; Plantilla de configuración inicial (no sobrescribe si ya existe una personalizada)
-Source: "bin\config.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
+Source: "config.example.json"; DestDir: "{app}"; DestName: "config.json"; Flags: onlyifdoesntexist
 
 [Icons]
 ; Acceso directo en el menú de inicio
