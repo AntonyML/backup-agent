@@ -30,18 +30,22 @@ jobs:
           options: /O+
           filepath: installer.iss
 
-      - name: Subir Instalador como Artefacto
+      - name: Subir Instalador y Binario como Artefactos
         uses: actions/upload-artifact@v4
         with:
-          name: BackupAgent-Setup-Windows
-          path: dist/*.exe
+          name: BackupAgent-Windows
+          path: |
+            dist/*.exe
+            bin/backup-agent.exe
           retention-days: 30
 
       - name: Crear GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
+          files: |
+            dist/*.exe
+            bin/backup-agent.exe
           draft: false
           prerelease: false
           generate_release_notes: true
