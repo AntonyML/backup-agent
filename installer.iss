@@ -4,7 +4,7 @@
 #define MyAppName "Backup Agent Enterprise"
 #define MyAppVersion "4.0.0"
 #define MyAppPublisher "Antony Monge López"
-#define MyAppURL "https://github.com/AntonyML/femucaribe-backup-agent"
+#define MyAppURL "https://github.com/AntonyML/backup-agent"
 #define MyAppExeName "backup-agent.exe"
 
 [Setup]
