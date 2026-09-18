@@ -110,6 +110,16 @@ jobs:
         with:
           tag_name: ${{ steps.semver.outputs.version_tag }}
           name: Release ${{ steps.semver.outputs.version_tag }}
+          body: |
+            ## 📦 Artefactos de Distribución
+
+            | Archivo | Tipo | Uso Recomendado |
+            | :--- | :--- | :--- |
+            | **`BackupAgent-Setup-v${{ steps.semver.outputs.version }}.exe`** | **Instalador Oficial (Inno Setup)** | **Recomendado para Clientes y Nuevas Instalaciones.** Asistente guiado con aceptación obligatoria de Términos y Condiciones (EULA), instalación en `Archivos de programa\BackupAgent`, accesos directos en Escritorio y Menú Inicio para abrir la TUI con doble clic, plantilla `config.json` inicial segura y desinstalador limpio. |
+            | **`backup-agent.exe`** | **Binario Portable (CLI)** | **Para Administradores y Tareas Desatendidas.** Ejecutable puro sin necesidad de instalación previa. Ideal para el Programador de Tareas de Windows (Task Scheduler), scripts de automatización o diagnóstico rápido por consola. |
+
+            ---
+            *Consulte la documentación técnica completa en el [README del repositorio](https://github.com/AntonyML/backup-agent).*
           files: |
             dist/*.exe
             bin/backup-agent.exe

@@ -99,6 +99,18 @@ femucaribe-backup-agent/
 
 ---
 
+## 📦 Descargas y Distribución de Binarios
+
+En la sección de [Releases Oficiales](https://github.com/AntonyML/backup-agent/releases) se publican los siguientes archivos con cada versión:
+
+| Archivo | Tipo | Uso Recomendado | Descripción y Características |
+| :--- | :--- | :--- | :--- |
+| **`BackupAgent-Setup-vX.Y.Z.exe`** | **Instalador Oficial (Inno Setup)** | **Recomendado para Clientes y Nuevas Instalaciones** | • Asistente visual con aceptación obligatoria de Términos y Condiciones (EULA).<br>• Instala el agente en `C:\Program Files\BackupAgent`.<br>• Despliega la plantilla limpia de `config.json` inicial (sin sobrescribir configuraciones previas).<br>• Crea accesos directos en el **Escritorio** y **Menú Inicio** para abrir la interfaz gráfica de terminal (TUI) con doble clic.<br>• Incluye desinstalador integrado (`unins000.exe`) en el Panel de Control de Windows. |
+| **`backup-agent.exe`** | **Binario Portable / CLI (Go)** | **Para Servidores, Administradores y Tareas Desatendidas** | • Ejecución inmediata sin necesidad de asistente de instalación.<br>• Contiene el motor completo de línea de comandos (`backup-agent backup`, `doctor`, `sync`, `tui`, etc.).<br>• Ideal para configurar en el Programador de Tareas de Windows (Task Scheduler), integración en scripts PowerShell/Batch o uso portable. |
+| **`Source code (zip / tar.gz)`** | **Código Fuente** | **Auditoría y Desarrollo** | Captura exacta del repositorio Git en el tag correspondiente a la versión. |
+
+---
+
 ## Requisitos
 
 - Go 1.25+ (probado con Go 1.27 en Windows; requerido por `go-mssqldb` v1.11).
