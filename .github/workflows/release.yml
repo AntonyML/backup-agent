@@ -23,12 +23,12 @@ jobs:
         id: semver
         shell: pwsh
         run: |
-          $exactTag = git describe --tags --exact-match HEAD 2>$null
+          $exactTag = (git tag --points-at HEAD) | Where-Object { $_ -match "^v\d" } | Select-Object -First 1
           if ($exactTag) {
             $version = $exactTag.TrimStart('v')
             $versionTag = $exactTag
           } else {
-            $latestTag = git describe --tags --match "v[0-9]*" --abbrev=0 2>$null
+            $latestTag = (git tag -l "v*" --sort=-v:refname) | Select-Object -First 1
             if (-not $latestTag) {
               $version = "4.0.0"
             } else {
@@ -71,6 +71,7 @@ jobs:
           Write-Host "Versión calculada: $version (Tag: $versionTag)"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "version_tag=$versionTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $global:LASTEXITCODE = 0
 
       - name: Configurar Go
         uses: actions/setup-go@v5
