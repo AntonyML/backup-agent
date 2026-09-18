@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -34,8 +35,8 @@ func newImportModalModel(app AppConnector, styles Styles) importModalModel {
 
 	// 0: Ruta del archivo a importar
 	inputs[0] = textinput.New()
-	inputs[0].Placeholder = "backup-agent-config.bacfg"
-	inputs[0].SetValue("backup-agent-config.bacfg")
+	inputs[0].Placeholder = filepath.Join("exports", "backup-agent-config.bacfg")
+	inputs[0].SetValue(filepath.Join("exports", "backup-agent-config.bacfg"))
 	inputs[0].Focus()
 	inputs[0].CharLimit = 260
 	inputs[0].SetWidth(46)
@@ -56,7 +57,7 @@ func newImportModalModel(app AppConnector, styles Styles) importModalModel {
 }
 
 func (m *importModalModel) reset() {
-	m.inputs[0].SetValue("backup-agent-config.bacfg")
+	m.inputs[0].SetValue(filepath.Join("exports", "backup-agent-config.bacfg"))
 	m.inputs[1].SetValue("")
 	m.focused = 0
 	m.loading = false

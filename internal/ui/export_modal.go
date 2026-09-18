@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -34,8 +35,8 @@ func newExportModalModel(app AppConnector, styles Styles) exportModalModel {
 
 	// 0: Ruta de salida
 	inputs[0] = textinput.New()
-	inputs[0].Placeholder = "backup-agent-config.bacfg"
-	inputs[0].SetValue("backup-agent-config.bacfg")
+	inputs[0].Placeholder = filepath.Join("exports", "backup-agent-config.bacfg")
+	inputs[0].SetValue(filepath.Join("exports", "backup-agent-config.bacfg"))
 	inputs[0].Focus()
 	inputs[0].CharLimit = 260
 	inputs[0].SetWidth(46)
@@ -63,7 +64,7 @@ func newExportModalModel(app AppConnector, styles Styles) exportModalModel {
 }
 
 func (m *exportModalModel) reset() {
-	m.inputs[0].SetValue("backup-agent-config.bacfg")
+	m.inputs[0].SetValue(filepath.Join("exports", "backup-agent-config.bacfg"))
 	m.inputs[1].SetValue("")
 	m.inputs[2].SetValue("")
 	m.focused = 0
@@ -149,7 +150,7 @@ func (m exportModalModel) update(msg tea.Msg) (exportModalModel, tea.Cmd) {
 func (m exportModalModel) submit() (exportModalModel, tea.Cmd) {
 	outPath := strings.TrimSpace(m.inputs[0].Value())
 	if outPath == "" {
-		outPath = "backup-agent-config.bacfg"
+		outPath = filepath.Join("exports", "backup-agent-config.bacfg")
 	}
 	pass1 := m.inputs[1].Value()
 	pass2 := m.inputs[2].Value()

@@ -11,3 +11,7 @@ agent.lock
 .env.test
 # Local Pi runtime state
 .atl/
+exports/*
+!exports/.gitkeep
+*.bacfg
+dist/

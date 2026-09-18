@@ -58,7 +58,7 @@ func newConfigCmd(exeDir string, configPath *string) *cobra.Command {
 		Short: "Exporta la configuración y credenciales a un archivo cifrado (.bacfg)",
 		Long:  "Empaqueta config.json y las credenciales de R2 en un archivo cifrado con AES-256-GCM para transporte seguro a otra máquina.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			outPath := "backup-agent-config.bacfg"
+			outPath := filepath.Join("exports", "backup-agent-config.bacfg")
 			if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
 				outPath = strings.TrimSpace(args[0])
 			}
