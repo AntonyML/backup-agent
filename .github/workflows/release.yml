@@ -2,17 +2,32 @@ name: Build and Release Installer
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build-installer:
+  build-and-release:
     runs-on: windows-latest
 
     steps:
       - name: Checkout Código Fuente
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calcular Próxima Versión Semántica
+        id: semver
+        uses: paulhatch/semantic-version@v5.4.3
+        with:
+          tag_prefix: "v"
+          major_pattern: "(?i)BREAKING CHANGE|breaking:"
+          minor_pattern: "(?i)feat:|feature:"
+          version_format: "${major}.${minor}.${patch}"
+          default_version: "4.0.0"
 
       - name: Configurar Go
         uses: actions/setup-go@v5
@@ -20,29 +35,32 @@ jobs:
           go-version: '1.24'
           check-latest: true
 
-      - name: Compilar Binario Go (Release)
+      - name: Compilar Binario Go con Versión Inyectada
         run: |
-          go build -v -ldflags="-s -w" -o bin/backup-agent.exe ./cmd/backup-agent
+          $ver = "${{ steps.semver.outputs.version }}"
+          Write-Host "Compilando Backup Agent versión $ver..."
+          go build -v -ldflags="-s -w -X femucaribe-backup-agent/internal/version.Current=$ver" -o bin/backup-agent.exe ./cmd/backup-agent
 
       - name: Compilar Instalador con Inno Setup
         uses: knopp/github-action-innosetup@v3
         with:
-          options: /O+
+          options: /O+ /DMyAppVersion=${{ steps.semver.outputs.version }}
           filepath: installer.iss
 
       - name: Subir Instalador y Binario como Artefactos
         uses: actions/upload-artifact@v4
         with:
-          name: BackupAgent-Windows
+          name: BackupAgent-v${{ steps.semver.outputs.version }}-Windows
           path: |
             dist/*.exe
             bin/backup-agent.exe
           retention-days: 30
 
-      - name: Crear GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Crear GitHub Release y Tag Automático
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.semver.outputs.version_tag }}
+          name: Release ${{ steps.semver.outputs.version_tag }}
           files: |
             dist/*.exe
             bin/backup-agent.exe
